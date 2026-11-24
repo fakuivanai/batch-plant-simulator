@@ -7,11 +7,12 @@ import { Faceplate, type ModuleTag } from './Faceplates.tsx';
 import { IoPanel } from './IoPanel.tsx';
 import { JournalPanel } from './JournalPanel.tsx';
 import { PhasesPanel } from './PhasesPanel.tsx';
+import { SimulatorPanel } from './SimulatorPanel.tsx';
 import { createOperatorSession } from './operator-session.ts';
 import { Overview } from './Overview.tsx';
 import { speeds, type Runtime } from './runtime.ts';
 
-const tabs = ['Faceplate', 'Phases', 'Batch', 'Batch record', 'I/O', 'Journal'] as const;
+const tabs = ['Faceplate', 'Phases', 'Batch', 'Batch record', 'Journal', 'I/O', 'Simulator'] as const;
 type Tab = (typeof tabs)[number];
 
 export function App(props: { runtime: Runtime }): JSX.Element {
@@ -89,6 +90,9 @@ export function App(props: { runtime: Runtime }): JSX.Element {
             </Match>
             <Match when={tab() === 'I/O'}>
               <IoPanel view={runtime.view} />
+            </Match>
+            <Match when={tab() === 'Simulator'}>
+              <SimulatorPanel view={runtime.view} runtime={runtime} />
             </Match>
             <Match when={tab() === 'Journal'}>
               <JournalPanel entries={runtime.view.journal} />

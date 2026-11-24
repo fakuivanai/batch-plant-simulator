@@ -60,7 +60,7 @@ export interface PhaseContext<Parameters> {
   readonly actor: Actor;
   /** How long the active step has run. A RUNNING step's time is kept through a pause or a hold. */
   readonly stepMilliseconds: number;
-  /** How long the RUNNING logic has run in total since the phase started. */
+  /** How long the RUNNING logic has run since the phase started, or since its last restart. */
   readonly runningMilliseconds: number;
 }
 
@@ -290,7 +290,12 @@ export class Phase<Parameters extends Record<string, number>, Steps extends Phas
         const next = this.definition.logic.RESTARTING.steps[status.active.step](
           this.#context(unit, status.parameters, status.active.milliseconds),
         );
-        if (next === done) this.#enter({ state: 'RUNNING', parameters: status.parameters, running: status.running }, { kind: 'logic-done' });
+        if (next === done) {
+          // A restart gives the running logic a fresh time budget: what went
+          // wrong before the hold has been dealt with.
+          this.#runningMilliseconds = 0;
+          this.#enter({ state: 'RUNNING', parameters: status.parameters, running: status.running }, { kind: 'logic-done' });
+        }
         else this.#status = { ...status, active: this.#advance(status.active, next) };
         break;
       }
