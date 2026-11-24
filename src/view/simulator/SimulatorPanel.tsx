@@ -14,9 +14,7 @@ export function SimulatorPanel(props: { view: SimulatorSnapshot; runtime: Runtim
   const unit = () => props.view.unit;
   const active = (kind: (typeof faultKinds)[number]) => props.view.activeFaults.includes(kind);
   const toggle = (kind: (typeof faultKinds)[number]) => {
-    if (active(kind)) props.runtime.simulator.clearFault(kind);
-    else props.runtime.simulator.injectFault(kind);
-    props.runtime.refresh();
+    void props.runtime.setFault(kind, !active(kind));
   };
   return (
     <section class="panel simulator-panel">

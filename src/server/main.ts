@@ -1,6 +1,6 @@
 // Runs the simulation in Node and serves it over OPC UA.
 //
-//   pnpm serve [--port 4840] [--host 127.0.0.1] [--speed 1] [--seed 200]
+//   pnpm serve [--port 4840] [--web-port 8080] [--host 127.0.0.1] [--speed 1] [--seed 200]
 //
 // The simulation advances in real time (or at --speed times real time),
 // paced by the wall clock here; the engine itself still only steps.
@@ -11,11 +11,14 @@ import { parseArgs } from 'node:util';
 import { Pacer } from '../engine/pacing.ts';
 import { Simulator, type SimulatorSnapshot } from '../engine/simulator.ts';
 import { stepMilliseconds } from '../engine/time.ts';
+import { fileURLToPath } from 'node:url';
 import { startOpcUaServer } from './opcua-server.ts';
+import { startWebServer } from './web-server.ts';
 
 const { values } = parseArgs({
   options: {
     port: { type: 'string', default: '4840' },
+    'web-port': { type: 'string', default: '8080' },
     host: { type: 'string', default: '127.0.0.1' },
     speed: { type: 'string', default: '1' },
     seed: { type: 'string', default: '200' },
@@ -30,6 +33,7 @@ function positiveInteger(name: string, text: string): number {
 }
 
 const port = positiveInteger('port', values.port);
+const webPort = positiveInteger('web-port', values['web-port']);
 const speed = positiveInteger('speed', values.speed);
 const seed = positiveInteger('seed', values.seed);
 
@@ -72,6 +76,29 @@ if (speed !== 1) {
   console.log('An outside batch engine writes its watchdog in real time; at this speed its phases will hold on a lost watchdog.');
 }
 
+
+const pagesFolder = fileURLToPath(new URL('../../dist/', import.meta.url));
+const web = await startWebServer({
+  host: values.host,
+  port: webPort,
+  pagesFolder,
+  simulation: {
+    snapshot: () => snapshot,
+    speed,
+    operate: (request) => {
+      const result = simulator.operate(request.operatorName, request.command, request.reason);
+      snapshot = simulator.snapshot();
+      return result;
+    },
+    setFault: (fault, active) => {
+      if (active) simulator.injectFault(fault);
+      else simulator.clearFault(fault);
+      snapshot = simulator.snapshot();
+    },
+  },
+});
+console.log(`Open ${web.url} to watch the plant and operate it.`);
+
 process.on('SIGINT', () => {
-  void server.stop().then(() => process.exit(0));
+  void Promise.all([server.stop(), web.stop()]).then(() => process.exit(0));
 });

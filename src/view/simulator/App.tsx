@@ -11,7 +11,7 @@ import { PhasesPanel } from './PhasesPanel.tsx';
 import { SimulatorPanel } from './SimulatorPanel.tsx';
 import { createOperatorSession } from './operator-session.ts';
 import { Overview } from './Overview.tsx';
-import { speeds, type Runtime } from './runtime.ts';
+import { speeds, type Clock, type Runtime } from './runtime.ts';
 
 const tabs = ['Faceplate', 'Phases', 'Batch', 'Batch record', 'Journal', 'I/O', 'Simulator'] as const;
 type Tab = (typeof tabs)[number];
@@ -32,21 +32,7 @@ export function App(props: { runtime: Runtime }): JSX.Element {
         <span class="clock" title="Simulated time since the start">
           {formatClock(runtime.view.timeMilliseconds)}
         </span>
-        <button type="button" onClick={() => runtime.setRunning(!runtime.controls.running)}>
-          {runtime.controls.running ? 'Pause simulation' : 'Run simulation'}
-        </button>
-        <label>
-          Speed{' '}
-          <select
-            value={runtime.controls.speed}
-            onChange={(event) => {
-              const chosen = speeds.find((speed) => String(speed) === event.currentTarget.value);
-              if (chosen !== undefined) runtime.setSpeed(chosen);
-            }}
-          >
-            <For each={speeds}>{(speed) => <option value={speed}>{speed}×</option>}</For>
-          </select>
-        </label>
+        <ClockControls clock={runtime.clock} />
         <a href={pageFile('documentation')}>How it works</a>
         <a href={pageFile('limitations')}>Limitations</a>
         <span class="spacer" />
@@ -104,5 +90,41 @@ export function App(props: { runtime: Runtime }): JSX.Element {
         </div>
       </main>
     </div>
+  );
+}
+
+/** Pause and speed when the page runs the simulation; the server's speed and the connection when it shows a server's. */
+function ClockControls(props: { clock: Clock }): JSX.Element {
+  return (
+    <Switch>
+      <Match when={props.clock.kind === 'local' ? props.clock : null}>
+        {(clock) => (
+          <>
+            <button type="button" onClick={() => clock().setRunning(!clock().running)}>
+              {clock().running ? 'Pause simulation' : 'Run simulation'}
+            </button>
+            <label>
+              Speed{' '}
+              <select
+                value={clock().speed}
+                onChange={(event) => {
+                  const chosen = speeds.find((speed) => String(speed) === event.currentTarget.value);
+                  if (chosen !== undefined) clock().setSpeed(chosen);
+                }}
+              >
+                <For each={speeds}>{(speed) => <option value={speed}>{speed}×</option>}</For>
+              </select>
+            </label>
+          </>
+        )}
+      </Match>
+      <Match when={props.clock.kind === 'server' ? props.clock : null}>
+        {(clock) => (
+          <span class={clock().connected ? 'server-clock' : 'server-clock lost'}>
+            {clock().connected ? `Running on the server at ${clock().speed}×` : 'Lost contact with the server, reconnecting…'}
+          </span>
+        )}
+      </Match>
+    </Switch>
   );
 }

@@ -195,7 +195,7 @@ function ActiveBatch(props: {
               type="button"
               disabled={!accepted().has(command)}
               onClick={() => {
-                if (props.session.operate({ kind: 'batch-command', command }, reason())) setReason('');
+                void props.session.operate({ kind: 'batch-command', command }, reason()).then((ok) => ok && setReason(''));
               }}
             >
               {command}

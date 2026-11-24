@@ -29,8 +29,8 @@ export interface OperatorSession {
   setName(name: string): void;
   /** The last refusal, shown until the next command. */
   readonly refusal: Accessor<string | null>;
-  /** Sends a command as this operator. Returns whether it was accepted. */
-  operate(command: OperatorCommand, reason?: string): boolean;
+  /** Sends a command as this operator. Resolves to whether it was accepted. */
+  operate(command: OperatorCommand, reason?: string): Promise<boolean>;
 }
 
 export function createOperatorSession(runtime: Runtime): OperatorSession {
@@ -43,10 +43,9 @@ export function createOperatorSession(runtime: Runtime): OperatorSession {
       storeName(value);
     },
     refusal,
-    operate: (command, reason) => {
-      const result = runtime.simulator.operate(name(), command, reason);
+    operate: async (command, reason) => {
+      const result = await runtime.operate(name(), command, reason);
       setRefusal(result.ok ? null : refusalMessages[result.error]);
-      runtime.refresh();
       return result.ok;
     },
   };

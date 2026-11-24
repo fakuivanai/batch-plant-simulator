@@ -259,3 +259,5 @@ table.formula input { width: 5.5rem; }
 .doc-table th, .doc-table td { border: 1px solid color-mix(in srgb, var(--line) 40%, transparent); padding: 0.25rem 0.5rem; vertical-align: top; }
 .doc-table th { white-space: nowrap; }
 .bar a { font-size: 0.9rem; }
+.server-clock { font-size: 0.9rem; color: var(--text-muted); }
+.server-clock.lost { color: var(--alarm); font-weight: 600; }

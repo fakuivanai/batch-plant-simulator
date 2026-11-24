@@ -7,7 +7,7 @@
     "check": "tsc --noEmit -p tsconfig.engine.json && tsc --noEmit -p tsconfig.json",
     "test": "node --test --test-concurrency=1 \"tests/**/*.test.ts\"",
     "build": "node build.ts",
-    "serve": "node src/server/main.ts",
+    "serve": "node build.ts && node src/server/main.ts",
     "verify:light": "pnpm check && pnpm test && pnpm build"
   },
   "dependencies": {
