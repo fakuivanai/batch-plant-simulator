@@ -79,7 +79,14 @@ export interface PhaseDefinition<Parameters extends Record<string, number>, Step
 }
 
 /** Who may command a phase: the operator, or a batch that has taken it over. */
-export type PhaseOwner = { readonly kind: 'operator' } | { readonly kind: 'batch'; readonly batchId: string };
+/**
+ * Who may command a phase: the operator, a batch of ours that has taken it
+ * over, or an outside batch engine the operator has handed it to.
+ */
+export type PhaseOwner =
+  | { readonly kind: 'operator' }
+  | { readonly kind: 'batch'; readonly batchId: string }
+  | { readonly kind: 'external' };
 
 export interface PhaseSnapshot {
   readonly name: PhaseName;
@@ -92,9 +99,23 @@ export interface PhaseSnapshot {
   readonly owner: PhaseOwner;
   /** Why the failure monitor last held the phase. */
   readonly failure: string | null;
+  /** The last watchdog value an outside batch engine wrote, which the phase echoes back. */
+  readonly watchdog: number | null;
 }
 
-export type PhaseCommandRefusal = 'NOT_ACCEPTED_IN_STATE' | 'OWNED_BY_BATCH' | 'NOT_OWNER' | 'BAD_PARAMETERS';
+export type PhaseCommandRefusal =
+  | 'NOT_ACCEPTED_IN_STATE'
+  | 'OWNED_BY_BATCH'
+  | 'OWNED_BY_BATCH_ENGINE'
+  | 'NOT_OWNER'
+  | 'BAD_PARAMETERS';
+
+/**
+ * An outside batch engine writes a new watchdog value about once a second
+ * while it drives a phase. Ten seconds without one means it has lost
+ * contact, and the phase holds rather than carry on with nobody in charge.
+ */
+export const watchdogTimeoutMilliseconds = 10_000;
 
 interface StepPosition<Step extends string> {
   readonly step: Step;
@@ -141,7 +162,8 @@ export interface EquipmentPhase {
   readonly owner: PhaseOwner;
   readonly snapshot: PhaseSnapshot;
   command(command: ProceduralCommand, by: Actor, parameters?: Readonly<Record<string, number>>): Result<PhaseCommandRefusal>;
-  setOwner(owner: PhaseOwner): void;
+  setOwner(owner: PhaseOwner, by: Actor): void;
+  feedWatchdog(value: number): void;
   scan(unit: UnitT200): void;
 }
 
@@ -153,6 +175,8 @@ export class Phase<Parameters extends Record<string, number>, Steps extends Phas
   #runningMilliseconds = 0;
   #owner: PhaseOwner = { kind: 'operator' };
   #failure: string | null = null;
+  #watchdog: number | null = null;
+  #millisecondsSinceWatchdog = 0;
 
   constructor(definition: PhaseDefinition<Parameters, Steps>, recorder: Recorder) {
     this.definition = definition;
@@ -172,8 +196,17 @@ export class Phase<Parameters extends Record<string, number>, Steps extends Phas
     return this.#owner;
   }
 
-  setOwner(owner: PhaseOwner): void {
+  setOwner(owner: PhaseOwner, by: Actor): void {
+    this.#recorder.record({ kind: 'phase-owner-changed', phase: this.name, from: this.#owner, to: owner, by });
     this.#owner = owner;
+    // A new owner starts with a fresh watchdog.
+    this.#millisecondsSinceWatchdog = 0;
+  }
+
+  /** An outside batch engine shows it is still there by writing a new value. */
+  feedWatchdog(value: number): void {
+    if (value !== this.#watchdog) this.#millisecondsSinceWatchdog = 0;
+    this.#watchdog = value;
   }
 
   get snapshot(): PhaseSnapshot {
@@ -188,23 +221,22 @@ export class Phase<Parameters extends Record<string, number>, Steps extends Phas
       parameterDefinitions: this.definition.parameters,
       owner: this.#owner,
       failure: this.#failure,
+      watchdog: this.#watchdog,
     };
   }
 
   /**
-   * Commands from the operator or the owning batch. START takes the
-   * parameters, checked here, at the edge, against the phase's definitions.
+   * Commands from the phase's owner: the operator, the owning batch or an
+   * outside batch engine. START takes the parameters, checked here, at the
+   * edge, against the phase's definitions.
    */
   command(
     command: ProceduralCommand,
     by: Actor,
     parameters?: Readonly<Record<string, number>>,
   ): Result<PhaseCommandRefusal> {
-    const owner = this.#owner;
-    if (owner.kind === 'batch' && !(by.kind === 'program' && by.name === owner.batchId)) {
-      return refused(by.kind === 'operator' ? 'OWNED_BY_BATCH' : 'NOT_OWNER');
-    }
-    if (owner.kind === 'operator' && by.kind !== 'operator') return refused('NOT_OWNER');
+    const ownership = this.#ownershipRefusal(by);
+    if (ownership !== null) return refused(ownership);
     const status = this.#status;
     const next = stateAfterCommand(status.state, command);
     if (next === null) return refused('NOT_ACCEPTED_IN_STATE');
@@ -326,10 +358,31 @@ export class Phase<Parameters extends Record<string, number>, Steps extends Phas
     this.#monitor(unit);
   }
 
+  #ownershipRefusal(by: Actor): PhaseCommandRefusal | null {
+    const owner = this.#owner;
+    switch (owner.kind) {
+      case 'operator':
+        return by.kind === 'operator' ? null : 'NOT_OWNER';
+      case 'batch':
+        if (by.kind === 'program' && by.name === owner.batchId) return null;
+        return by.kind === 'operator' ? 'OWNED_BY_BATCH' : 'NOT_OWNER';
+      case 'external':
+        if (by.kind === 'external') return null;
+        return by.kind === 'operator' ? 'OWNED_BY_BATCH_ENGINE' : 'NOT_OWNER';
+    }
+  }
+
   #monitor(unit: UnitT200): void {
     const status = this.#status;
     if (!isMonitored(status.state) || !('running' in status)) return;
-    const reason = this.definition.failureMonitor(this.#context(unit, status.parameters, 0));
+    // An outside batch engine that stops writing its watchdog has lost contact.
+    const external = this.#owner.kind === 'external';
+    if (external) this.#millisecondsSinceWatchdog += stepMilliseconds;
+    const lostContact =
+      external && this.#millisecondsSinceWatchdog > watchdogTimeoutMilliseconds
+        ? `lost contact with the batch engine: no new watchdog value for ${watchdogTimeoutMilliseconds / 1000} s`
+        : null;
+    const reason = lostContact ?? this.definition.failureMonitor(this.#context(unit, status.parameters, 0));
     if (reason === null) return;
     this.#failure = reason;
     this.#hold(status.parameters, status.running, { kind: 'failure', reason });

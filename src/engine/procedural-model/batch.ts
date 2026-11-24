@@ -156,7 +156,7 @@ export class Batch<FormulaName extends string> {
       if (!phases.every((phase) => phase.state === 'IDLE' && phase.owner.kind === 'operator')) {
         return refused('EQUIPMENT_NOT_AVAILABLE');
       }
-      for (const phase of phases) phase.setOwner({ kind: 'batch', batchId: this.id });
+      for (const phase of phases) phase.setOwner({ kind: 'batch', batchId: this.id }, this.#actor);
       this.#startedAtMilliseconds = this.#clock();
       this.#enter({ state: 'RUNNING', step: 0 }, cause, reason);
       return accepted;
@@ -308,10 +308,10 @@ export class Batch<FormulaName extends string> {
   }
 
   #enter(status: BatchStatus, cause: BatchTransitionCause, reason?: string): void {
-    this.#recorder.record({ kind: 'batch-state-changed', batchId: this.id, from: this.#status.state, to: status.state, cause }, reason);
-    // Releasing the phases is still part of the batch, so it happens, and is
-    // recorded, before the batch counts as ended.
+    // Releasing the phases is still part of the batch, so it is recorded
+    // before the batch ends: the end is the last entry of its record.
     if (isFinal(status.state)) this.#release();
+    this.#recorder.record({ kind: 'batch-state-changed', batchId: this.id, from: this.#status.state, to: status.state, cause }, reason);
     this.#status = status;
   }
 
@@ -320,7 +320,7 @@ export class Batch<FormulaName extends string> {
     this.#endedAtMilliseconds = this.#clock();
     for (const phase of Object.values(this.#phases)) {
       if (isFinal(phase.state)) phase.command('RESET', this.#actor);
-      phase.setOwner({ kind: 'operator' });
+      phase.setOwner({ kind: 'operator' }, this.#actor);
     }
   }
 

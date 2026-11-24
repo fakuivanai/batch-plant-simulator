@@ -31,8 +31,10 @@ import { invariant } from '../engine/invariant.ts';
 import { signalRanges, type SignalRange } from '../engine/io.ts';
 import { deviceWords, type DiscreteDeviceSnapshot } from '../engine/physical-model/control-modules/discrete-device.ts';
 import type { MeasuredValue } from '../engine/physical-model/status.ts';
-import type { PhaseName } from '../engine/procedural-model/phase.ts';
-import type { SimulatorSnapshot } from '../engine/simulator.ts';
+import type { PhaseCommandRefusal, PhaseName } from '../engine/procedural-model/phase.ts';
+import type { Result } from '../engine/result.ts';
+import { refusalMessages, type ExternalCommand, type SimulatorSnapshot } from '../engine/simulator.ts';
+import { commandOfNumber, noCommand, stateNumbers } from './phase-interface.ts';
 import { stepMilliseconds } from '../engine/time.ts';
 
 /** Clients sample no faster than the simulation steps. */
@@ -47,7 +49,11 @@ const units = {
   minute: makeEUInformation('MIN', 'min', 'minute'),
 } as const satisfies Record<string, EUInformation>;
 
-export type SnapshotSource = () => SimulatorSnapshot;
+/** What the address space reads from the simulation, and the one way it changes it: as an outside batch engine. */
+export interface SimulationAccess {
+  readonly snapshot: () => SimulatorSnapshot;
+  readonly operate: (command: ExternalCommand) => Result<PhaseCommandRefusal>;
+}
 
 /**
  * The status of a measured value as an OPC UA StatusCode. A BAD value says
@@ -67,9 +73,9 @@ export function statusCodeOf(value: MeasuredValue, outOfService: boolean): Statu
 /** Builds variables under one object, each with a node id made from its path. */
 class Builder {
   readonly #namespace: Namespace;
-  readonly #source: SnapshotSource;
+  readonly #source: () => SimulatorSnapshot;
 
-  constructor(namespace: Namespace, source: SnapshotSource) {
+  constructor(namespace: Namespace, source: () => SimulatorSnapshot) {
     this.#namespace = namespace;
     this.#source = source;
   }
@@ -121,11 +127,70 @@ class Builder {
     });
   }
 
+  integer(parent: UAObject, path: string, name: string, read: (snapshot: SimulatorSnapshot) => number): void {
+    this.#variable(parent, path, name, DataType.Int32, read);
+  }
+
+  /** An integer a client may write. `write` says whether the write was taken, as an OPC UA status code. */
+  writableInteger(
+    parent: UAObject,
+    path: string,
+    name: string,
+    read: (snapshot: SimulatorSnapshot) => number,
+    write: (value: number) => StatusCode,
+  ): void {
+    this.#namespace.addVariable({
+      componentOf: parent,
+      browseName: name,
+      nodeId: `s=${path}.${name}`,
+      dataType: 'Int32',
+      accessLevel: 'CurrentRead | CurrentWrite',
+      userAccessLevel: 'CurrentRead | CurrentWrite',
+      minimumSamplingInterval: samplingIntervalMilliseconds,
+      value: {
+        timestamped_get: () => dataValue(new Variant({ dataType: DataType.Int32, value: read(this.#source()) }), StatusCodes.Good),
+        timestamped_set: async (written: DataValue) =>
+          Number.isInteger(written.value.value) ? write(written.value.value) : StatusCodes.BadTypeMismatch,
+      },
+    });
+  }
+
+  /** An analog item a client may write. */
+  writableAnalog(
+    parent: UAObject,
+    path: string,
+    name: string,
+    unit: EUInformation,
+    range: SignalRange,
+    read: () => { readonly value: number; readonly statusCode: StatusCode },
+    write: (value: number) => StatusCode,
+  ): void {
+    this.#namespace.addAnalogDataItem({
+      componentOf: parent,
+      browseName: name,
+      nodeId: `s=${path}.${name}`,
+      dataType: 'Double',
+      accessLevel: 'CurrentRead | CurrentWrite',
+      userAccessLevel: 'CurrentRead | CurrentWrite',
+      engineeringUnits: unit,
+      engineeringUnitsRange: { low: range.lower, high: range.upper },
+      minimumSamplingInterval: samplingIntervalMilliseconds,
+      value: {
+        timestamped_get: () => {
+          const { value, statusCode } = read();
+          return dataValue(new Variant({ dataType: DataType.Double, value }), statusCode);
+        },
+        timestamped_set: async (written: DataValue) =>
+          typeof written.value.value === 'number' ? write(written.value.value) : StatusCodes.BadTypeMismatch,
+      },
+    });
+  }
+
   #variable<T extends boolean | string | number>(
     parent: UAObject,
     path: string,
     name: string,
-    dataType: DataType.Boolean | DataType.String | DataType.Double,
+    dataType: DataType.Boolean | DataType.String | DataType.Double | DataType.Int32,
     read: (snapshot: SimulatorSnapshot) => T,
   ): void {
     this.#namespace.addVariable({
@@ -184,14 +249,14 @@ function failureText(device: DiscreteDeviceSnapshot): string {
 }
 
 /** Adds the unit T-200 and everything in it under the server's Objects folder. */
-export function publishUnit(namespace: Namespace, objects: UAObject, source: SnapshotSource): UAObject {
-  const build = new Builder(namespace, source);
+export function publishUnit(namespace: Namespace, objects: UAObject, access: SimulationAccess): UAObject {
+  const build = new Builder(namespace, access.snapshot);
   const unit = namespace.addObject({ organizedBy: objects, browseName: 'T-200', nodeId: 's=T-200' });
   build.number(unit, 'T-200', 'SimulatedTimeSeconds', (s) => s.timeMilliseconds / 1000);
   publishIo(build, unit);
   publishControlModules(build, unit);
   publishEquipmentModules(build, unit);
-  publishPhases(build, unit, source);
+  publishPhases(build, unit, access);
   publishBatch(build, unit);
   return unit;
 }
@@ -273,23 +338,106 @@ function publishEquipmentModules(build: Builder, unit: UAObject): void {
   build.text(transfer, here, 'Failure', (s) => s.unit.transfer.failure ?? '');
 }
 
-function publishPhases(build: Builder, unit: UAObject, source: SnapshotSource): void {
+/** How a refused command shows to the client that wrote it. */
+function statusCodeOfRefusal(refusal: PhaseCommandRefusal): StatusCode {
+  switch (refusal) {
+    case 'NOT_ACCEPTED_IN_STATE':
+      return StatusCodes.BadInvalidState;
+    case 'OWNED_BY_BATCH':
+    case 'OWNED_BY_BATCH_ENGINE':
+    case 'NOT_OWNER':
+      return StatusCodes.BadUserAccessDenied;
+    case 'BAD_PARAMETERS':
+      return StatusCodes.BadOutOfRange;
+  }
+}
+
+function publishPhases(build: Builder, unit: UAObject, access: SimulationAccess): void {
   const phases = build.folder(unit, 'T-200', 'Phases');
   const names: readonly PhaseName[] = ['CHARGE_WATER', 'AGITATE', 'HEAT', 'TRANSFER'];
   for (const name of names) {
     const phase = build.object(phases, 'T-200.Phases', name);
     const here = `T-200.Phases.${name}`;
+    const definitions = Object.entries(access.snapshot().phases[name].parameterDefinitions);
+    // What the engine has written: the last command, the refusal of it if
+    // any, and the parameters waiting for the next START. These are the
+    // interface's own registers, like the tags of phase logic in a PLC.
+    let lastCommand = noCommand;
+    let commandResult = '';
+    const staged = new Map<string, number>(definitions.map(([parameter]) => [parameter, Number.NaN]));
+
     build.text(phase, here, 'State', (s) => s.phases[name].state);
+    build.integer(phase, here, 'StateNumber', (s) => stateNumbers[s.phases[name].state]);
     build.text(phase, here, 'Step', (s) => s.phases[name].step ?? '');
     build.text(phase, here, 'Owner', (s) => {
       const owner = s.phases[name].owner;
       return owner.kind === 'batch' ? `batch ${owner.batchId}` : owner.kind;
     });
     build.text(phase, here, 'Failure', (s) => s.phases[name].failure ?? '');
+
+    build.writableInteger(
+      phase,
+      here,
+      'Command',
+      () => lastCommand,
+      (number) => {
+        lastCommand = number;
+        const command = commandOfNumber(number);
+        if (command === undefined) {
+          commandResult = `${number} is not a command number`;
+          return StatusCodes.BadOutOfRange;
+        }
+        if (command === null) {
+          commandResult = '';
+          return StatusCodes.Good;
+        }
+        const parameters = command === 'START' ? Object.fromEntries(staged) : undefined;
+        const result = access.operate(
+          parameters === undefined
+            ? { kind: 'phase-command', phase: name, command }
+            : { kind: 'phase-command', phase: name, command, parameters },
+        );
+        commandResult = result.ok ? '' : refusalMessages[result.error];
+        return result.ok ? StatusCodes.Good : statusCodeOfRefusal(result.error);
+      },
+    );
+    build.text(phase, here, 'CommandResult', () => commandResult);
+    build.writableInteger(
+      phase,
+      here,
+      'Watchdog',
+      (s) => s.phases[name].watchdog ?? 0,
+      (value) => {
+        access.operate({ kind: 'feed-watchdog', phase: name, value });
+        return StatusCodes.Good;
+      },
+    );
+    build.integer(phase, here, 'WatchdogEcho', (s) => s.phases[name].watchdog ?? 0);
+
+    const parameters = build.folder(phase, here, 'Parameters');
+    for (const [parameter, definition] of definitions) {
+      build.writableAnalog(
+        parameters,
+        `${here}.Parameters`,
+        parameter,
+        unitOf(definition.unit),
+        { lower: definition.minimum, upper: definition.maximum },
+        () => {
+          const value = staged.get(parameter) ?? Number.NaN;
+          return Number.isNaN(value) ? { value, statusCode: StatusCodes.BadWaitingForInitialData } : good(value);
+        },
+        (value) => {
+          // Staged as written: the phase checks the limits at START, where it
+          // checks every parameter together.
+          staged.set(parameter, value);
+          return StatusCodes.Good;
+        },
+      );
+    }
     // The parameters the phase is running with. While it is idle it has none,
     // and the values read as BAD: there is nothing to report yet.
     const active = build.folder(phase, here, 'ActiveParameters');
-    for (const [parameter, definition] of Object.entries(source().phases[name].parameterDefinitions)) {
+    for (const [parameter, definition] of definitions) {
       build.analog(
         active,
         `${here}.ActiveParameters`,

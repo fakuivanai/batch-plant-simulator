@@ -37,6 +37,9 @@ const seed = positiveInteger('seed', values.seed);
 const stateFolder = process.env['XDG_STATE_HOME'] ?? path.join(homedir(), '.local', 'state');
 const pkiFolder = path.join(stateFolder, 'batch-plant-simulator', 'pki');
 
+/** How commands from OPC UA clients show in the journal. */
+const outsideClient = 'OPC UA client';
+
 const simulator = new Simulator(seed);
 let snapshot: SimulatorSnapshot = simulator.snapshot();
 
@@ -51,8 +54,23 @@ setInterval(() => {
   if (steps > 0) snapshot = simulator.snapshot();
 }, stepMilliseconds / 2);
 
-const server = await startOpcUaServer({ host: values.host, port, pkiFolder, source: () => snapshot });
+const server = await startOpcUaServer({
+  host: values.host,
+  port,
+  pkiFolder,
+  access: {
+    snapshot: () => snapshot,
+    operate: (command) => {
+      const result = simulator.operateExternal(outsideClient, command);
+      snapshot = simulator.snapshot();
+      return result;
+    },
+  },
+});
 console.log(`Serving T-200 over OPC UA at ${server.endpointUrl}, ${speed}× real time. Ctrl+C stops it.`);
+if (speed !== 1) {
+  console.log('An outside batch engine writes its watchdog in real time; at this speed its phases will hold on a lost watchdog.');
+}
 
 process.on('SIGINT', () => {
   void server.stop().then(() => process.exit(0));

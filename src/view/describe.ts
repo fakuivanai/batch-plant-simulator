@@ -3,12 +3,19 @@
 
 import type { Actor } from '../engine/actor.ts';
 import type { BatchTransitionCause } from '../engine/procedural-model/batch.ts';
-import type { PhaseTransitionCause } from '../engine/procedural-model/phase.ts';
+import type { PhaseOwner, PhaseTransitionCause } from '../engine/procedural-model/phase.ts';
 import type { JournalEvent } from '../engine/record/journal.ts';
 import { formatNumber } from './format.ts';
 
 export function describeActor(actor: Actor): string {
-  return actor.kind === 'operator' ? actor.name : `${actor.name} (program)`;
+  switch (actor.kind) {
+    case 'operator':
+      return actor.name;
+    case 'program':
+      return `${actor.name} (program)`;
+    case 'external':
+      return `${actor.name} (outside system)`;
+  }
 }
 
 /** What happened, without who did it. */
@@ -32,6 +39,8 @@ export function describeEvent(event: JournalEvent): string {
       return `Alarm acknowledged: ${event.alarm}`;
     case 'phase-state-changed':
       return `${event.phase} ${event.from} → ${event.to}${describeCause(event.cause)}`;
+    case 'phase-owner-changed':
+      return `${event.phase} owner ${describeOwner(event.from)} → ${describeOwner(event.to)}`;
     case 'phase-parameters':
       return `${event.phase} parameters: ${describeParameters(event.parameters)}`;
     case 'batch-created':
@@ -82,5 +91,16 @@ function describeBatchCause(cause: BatchTransitionCause): string {
       return ' between phases';
     case 'phase-held':
       return `: ${cause.phase} held${cause.reason === null ? '' : ` (${cause.reason})`}`;
+  }
+}
+
+export function describeOwner(owner: PhaseOwner): string {
+  switch (owner.kind) {
+    case 'operator':
+      return 'operator';
+    case 'batch':
+      return `batch ${owner.batchId}`;
+    case 'external':
+      return 'outside batch engine';
   }
 }

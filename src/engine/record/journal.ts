@@ -6,7 +6,7 @@
 import type { Actor } from '../actor.ts';
 import type { Mode } from '../physical-model/mode.ts';
 import type { BatchTransitionCause } from '../procedural-model/batch.ts';
-import type { PhaseName, PhaseTransitionCause } from '../procedural-model/phase.ts';
+import type { PhaseName, PhaseOwner, PhaseTransitionCause } from '../procedural-model/phase.ts';
 import type { ProceduralState } from '../procedural-model/state-machine.ts';
 
 export type AlarmPriority = 'HIGH' | 'MEDIUM' | 'LOW';
@@ -34,6 +34,7 @@ export type JournalEvent =
       readonly to: ProceduralState;
       readonly cause: PhaseTransitionCause;
     }
+  | { readonly kind: 'phase-owner-changed'; readonly phase: PhaseName; readonly from: PhaseOwner; readonly to: PhaseOwner; readonly by: Actor }
   | { readonly kind: 'phase-parameters'; readonly phase: PhaseName; readonly parameters: Readonly<Record<string, number>>; readonly by: Actor }
   | {
       readonly kind: 'batch-created';

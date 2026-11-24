@@ -4,7 +4,7 @@
 
 import { mkdir } from 'node:fs/promises';
 import { MessageSecurityMode, OPCUACertificateManager, OPCUAServer, SecurityPolicy } from 'node-opcua';
-import { publishUnit, type SnapshotSource } from './address-space.ts';
+import { publishUnit, type SimulationAccess } from './address-space.ts';
 
 export interface OpcUaServerOptions {
   /** Where to listen. 127.0.0.1 keeps the server to this machine. */
@@ -12,7 +12,7 @@ export interface OpcUaServerOptions {
   readonly port: number;
   /** Where the server keeps its self-signed certificate. Outside the repository. */
   readonly pkiFolder: string;
-  readonly source: SnapshotSource;
+  readonly access: SimulationAccess;
 }
 
 export interface RunningServer {
@@ -45,7 +45,7 @@ export async function startOpcUaServer(options: OpcUaServerOptions): Promise<Run
   await server.initialize();
   const addressSpace = server.engine.addressSpace;
   if (addressSpace === null) throw new Error('Invariant broken: an initialized server has an address space');
-  publishUnit(addressSpace.getOwnNamespace(), addressSpace.rootFolder.objects, options.source);
+  publishUnit(addressSpace.getOwnNamespace(), addressSpace.rootFolder.objects, options.access);
   await server.start();
   const endpointUrl = server.getEndpointUrl();
   return {

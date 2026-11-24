@@ -6,7 +6,7 @@
 // with a reason. That is the edge where outside input enters: the page today,
 // OPC UA clients in the next stage.
 
-import { operator, type Actor } from './actor.ts';
+import { external, operator, type Actor } from './actor.ts';
 import type { FieldInputs, FieldOutputs } from './io.ts';
 import type { AnalogInputMode } from './physical-model/control-modules/analog-input.ts';
 import type { DiscreteDeviceMode } from './physical-model/control-modules/discrete-device.ts';
@@ -44,9 +44,19 @@ export type OperatorCommand =
       /** START's parameters, by name. */
       readonly parameters?: Readonly<Record<string, number>>;
     }
+  | { readonly kind: 'set-phase-owner'; readonly phase: PhaseName; readonly owner: 'operator' | 'external' }
   | { readonly kind: 'create-batch'; readonly formula: Readonly<Record<string, number>> }
   | { readonly kind: 'batch-command'; readonly command: ProceduralCommand }
   | { readonly kind: 'change-formula-value'; readonly parameter: string; readonly value: number };
+
+export type ExternalCommand =
+  | {
+      readonly kind: 'phase-command';
+      readonly phase: PhaseName;
+      readonly command: ProceduralCommand;
+      readonly parameters?: Readonly<Record<string, number>>;
+    }
+  | { readonly kind: 'feed-watchdog'; readonly phase: PhaseName; readonly value: number };
 
 export type OperatorRefusal =
   | 'NO_OPERATOR_NAME'
@@ -74,6 +84,7 @@ export const refusalMessages: Record<OperatorRefusal, string> = {
   ALREADY_ACKNOWLEDGED: 'That alarm is already acknowledged.',
   NOT_ACCEPTED_IN_STATE: "The phase's state doesn't accept that command.",
   OWNED_BY_BATCH: 'A batch owns the phase. Command the batch instead.',
+  OWNED_BY_BATCH_ENGINE: 'An outside batch engine owns the phase. Take it back first.',
   NOT_OWNER: 'Only the owner of the phase can command it.',
   BAD_PARAMETERS: 'Every parameter needs a value within its limits.',
   BATCH_RUNS_ONCE: 'A batch makes one lot and is never reset. Create a new batch instead.',
@@ -192,12 +203,34 @@ export class Simulator {
         return this.#alarms.acknowledge(command.alarm, by);
       case 'phase-command':
         return this.#phases[command.phase].command(command.command, by, command.parameters);
+      case 'set-phase-owner': {
+        const phase = this.#phases[command.phase];
+        if (phase.owner.kind === 'batch') return refused('OWNED_BY_BATCH');
+        if (phase.owner.kind !== command.owner) phase.setOwner({ kind: command.owner }, by);
+        return accepted;
+      }
       case 'create-batch':
         return this.#createBatch(command.formula, by, why);
       case 'batch-command':
         return this.#activeBatch()?.command(command.command, by, why) ?? refused('NO_ACTIVE_BATCH');
       case 'change-formula-value':
         return this.#activeBatch()?.changeFormula(command.parameter, command.value, by, why) ?? refused('NO_ACTIVE_BATCH');
+    }
+  }
+
+  /**
+   * Commands from an outside batch engine, such as one connected over OPC UA.
+   * It drives the phases the operator has handed to it, and feeds each one's
+   * watchdog to show it is still there.
+   */
+  operateExternal(client: string, command: ExternalCommand): Result<PhaseCommandRefusal> {
+    const phase = this.#phases[command.phase];
+    switch (command.kind) {
+      case 'phase-command':
+        return phase.command(command.command, external(client), command.parameters);
+      case 'feed-watchdog':
+        phase.feedWatchdog(command.value);
+        return accepted;
     }
   }
 

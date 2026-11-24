@@ -12,6 +12,7 @@ import {
   stateAfterCommand,
   type ProceduralState,
 } from '../../engine/procedural-model/state-machine.ts';
+import { describeOwner } from '../describe.ts';
 import { formatNumber } from '../format.ts';
 import { StateDiagram } from '../StateDiagram.tsx';
 import type { OperatorSession } from './operator-session.ts';
@@ -68,7 +69,7 @@ function PhaseCard(props: { phase: PhaseSnapshot; session: OperatorSession }): J
     Object.fromEntries(Object.entries(props.phase.parameterDefinitions).map(([name, definition]) => [name, String(definition.minimum)])),
   );
   const accepted = () => new Set(acceptedCommands(props.phase.state));
-  const ownedByBatch = () => props.phase.owner.kind === 'batch';
+  const ownedElsewhere = () => props.phase.owner.kind !== 'operator';
   const send = (command: (typeof proceduralCommands)[number]) => {
     const name: PhaseName = props.phase.name;
     if (command !== 'START') {
@@ -104,12 +105,29 @@ function PhaseCard(props: { phase: PhaseSnapshot; session: OperatorSession }): J
           )}
         </Show>
         <dt>Owner</dt>
-        <dd>{props.phase.owner.kind === 'operator' ? 'operator' : `batch ${props.phase.owner.batchId}`}</dd>
+        <dd>
+          {describeOwner(props.phase.owner)}{' '}
+          <Show when={props.phase.owner.kind !== 'batch'}>
+            <button
+              type="button"
+              title="An outside batch engine, connected over OPC UA, commands a phase only once the operator hands it over."
+              onClick={() =>
+                props.session.operate({
+                  kind: 'set-phase-owner',
+                  phase: props.phase.name,
+                  owner: props.phase.owner.kind === 'external' ? 'operator' : 'external',
+                })
+              }
+            >
+              {props.phase.owner.kind === 'external' ? 'Take back' : 'Hand to batch engine'}
+            </button>
+          </Show>
+        </dd>
       </dl>
       <Show when={props.phase.failure !== null && (props.phase.state === 'HOLDING' || props.phase.state === 'HELD')}>
         <p class="failure">Held by the failure monitor: {props.phase.failure}</p>
       </Show>
-      <Show when={props.phase.state === 'IDLE' && !ownedByBatch()}>
+      <Show when={props.phase.state === 'IDLE' && !ownedElsewhere()}>
         <ParameterInputs
           phase={props.phase}
           values={values()}
@@ -121,7 +139,7 @@ function PhaseCard(props: { phase: PhaseSnapshot; session: OperatorSession }): J
           {(command) => (
             <button
               type="button"
-              disabled={!accepted().has(command) || ownedByBatch()}
+              disabled={!accepted().has(command) || ownedElsewhere()}
               title={accepted().has(command) ? `${props.phase.state} → ${stateAfterCommand(props.phase.state, command)}` : `Not accepted in ${props.phase.state}`}
               onClick={() => send(command)}
             >
