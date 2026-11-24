@@ -1,0 +1,3 @@
+[submodule "external/clankerlib"]
+	path = external/clankerlib
+	url = ../clankerlib
