@@ -64,7 +64,10 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     stop: async () => {
       clearInterval(timer);
       for (const stream of streams) stream.end();
-      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+      const closed = new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+      // A browser keeps idle connections open; without this, stopping waits for them to time out.
+      server.closeAllConnections();
+      await closed;
     },
   };
 }
