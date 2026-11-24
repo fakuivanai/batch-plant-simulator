@@ -18,3 +18,22 @@ The guidelines for coding agents come in as a submodule:
 ```sh
 git clone --recurse-submodules <URL>
 ```
+
+## Development
+
+The build tools come from the Nix flake, pinned by `flake.lock`. Node.js 24
+and pnpm are needed only for building and testing; the built pages need only
+a browser.
+
+```sh
+nix develop
+pnpm install --frozen-lockfile
+pnpm verify:light
+```
+
+`verify:light` type-checks the sources, runs the unit tests and builds the
+pages into `dist/`. Each page is one self-contained HTML file that opens from
+disk with no server or network.
+
+The engine in `src/engine/` is type-checked on its own without the DOM or
+Node's APIs, so it runs unchanged in the browser and, later, in Node.

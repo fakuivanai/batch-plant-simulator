@@ -1,0 +1,9 @@
+{
+  "//": "The engine gets neither the DOM nor Node's types, so code there that reaches for either fails to compile.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src/engine/**/*.ts"]
+}
