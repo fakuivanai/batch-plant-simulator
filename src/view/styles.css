@@ -1,2 +1,150 @@
-:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-body { margin: 0; }
+/* Greys for the normal state, colour only for what needs attention, after the
+   high-performance HMI idea of ISA-101. */
+:root {
+  color-scheme: light;
+  --background: #d9d9d6;
+  --surface: #ececea;
+  --surface-raised: #f7f7f5;
+  --text: #1f2326;
+  --text-muted: #5b6166;
+  --line: #7b8185;
+  --line-strong: #2f3438;
+  --device-on: #3d4449;
+  --device-off: #ececea;
+  --contents: #a9bccb;
+  --accent: #2f5f8a;
+  --alarm: #c8102e;
+  --alarm-text: #ffffff;
+  --warning: #e2a400;
+  --good: #2f6b3a;
+  --uncertain: #9a6a00;
+  --bad: #c8102e;
+  --simulator: #6a3d8f;
+  font-family: system-ui, sans-serif;
+  font-size: 15px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #22262a;
+    --surface: #2c3136;
+    --surface-raised: #353b41;
+    --text: #e4e6e7;
+    --text-muted: #a3a9ae;
+    --line: #8a9196;
+    --line-strong: #d3d6d8;
+    --device-on: #d3d6d8;
+    --device-off: #2c3136;
+    --contents: #3e5568;
+    --accent: #8db7e0;
+    --alarm: #ff5a6e;
+    --alarm-text: #1a0004;
+    --warning: #ffc533;
+    --good: #7fc58b;
+    --uncertain: #e6b34d;
+    --bad: #ff5a6e;
+    --simulator: #c49be6;
+  }
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--text); }
+h1 { font-size: 1.1rem; margin: 0; }
+h2 { font-size: 1rem; margin: 1rem 0 0.5rem; }
+h2:first-child { margin-top: 0; }
+h3 { font-size: 0.95rem; margin: 0.75rem 0 0.25rem; }
+button, select, input { font: inherit; color: inherit; }
+button {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.45; cursor: default; }
+button.active { background: var(--device-on); color: var(--device-off); }
+select, input[type='text'], input[type='number'] {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.15rem 0.3rem;
+}
+input[type='number'] { width: 6rem; }
+a { color: var(--accent); }
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.bar .clock { font-variant-numeric: tabular-nums; font-size: 1.1rem; }
+.bar .spacer { flex: 1; }
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
+  gap: 1rem;
+  padding: 1rem;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); padding: 1rem 16px; }
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  min-width: 0;
+}
+.hint { color: var(--text-muted); margin: 0.25rem 0 0.5rem; font-size: 0.9rem; }
+
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 0.2rem 0.4rem; vertical-align: middle; }
+tbody tr + tr { border-top: 1px solid color-mix(in srgb, var(--line) 35%, transparent); }
+table.signals th { width: 6rem; font-weight: 600; white-space: nowrap; }
+table.signals td:last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.signal-on { font-weight: 700; }
+.signal-off { color: var(--text-muted); }
+input[type='range'] { width: 9rem; vertical-align: middle; }
+
+/* The overview diagram. */
+.overview { width: 100%; height: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+.overview text { fill: var(--text); font-size: 12px; text-anchor: middle; }
+.overview text.start { text-anchor: start; }
+.overview text.end { text-anchor: end; }
+.overview .label { fill: var(--text-muted); }
+.overview .tag { font-weight: 600; }
+.overview .tag.large { font-size: 16px; fill: var(--text-muted); }
+.overview .reading { font-variant-numeric: tabular-nums; }
+.overview .pipe { fill: none; stroke: var(--line); stroke-width: 3; }
+.overview .vessel { fill: none; stroke: var(--line-strong); stroke-width: 2; }
+.overview .jacket { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 6 3; }
+.overview .contents { fill: var(--contents); }
+.overview .shaft { fill: none; stroke: var(--line-strong); stroke-width: 2; }
+.overview .device path, .overview .device circle, .overview .device rect {
+  stroke: var(--line-strong); stroke-width: 1.5; fill: var(--device-off);
+}
+.overview .device line { stroke: var(--line-strong); stroke-width: 1.5; }
+.overview .device.on path, .overview .device.on circle, .overview .device.on rect { fill: var(--device-on); }
+.overview .device.on .mark { fill: var(--device-off); }
+.overview .device.moving path { fill: var(--line); }
+.overview .device .mark-text { fill: var(--text); font-weight: 700; }
+.overview .device.on .mark-text { fill: var(--device-off); }
+.overview .instrument circle { fill: var(--surface-raised); stroke: var(--line-strong); stroke-width: 1.5; }
+.overview .instrument line { stroke: var(--line-strong); stroke-width: 1; }
+.overview .instrument line.signal { stroke-dasharray: 4 3; stroke: var(--line); }
+.overview .instrument .letters { font-size: 10px; font-weight: 700; }
+.overview .instrument .loop { font-size: 10px; }
+.overview .clickable { cursor: pointer; }
+.overview .clickable:hover circle, .overview .clickable:hover path, .overview .clickable:hover rect { stroke: var(--accent); }
+.overview .selected circle, .overview .selected path, .overview .selected rect { stroke: var(--accent); stroke-width: 3; }
+.overview .alarm-box { fill: var(--alarm); }
+.overview .status-bad { fill: var(--bad); font-weight: 700; }
+.overview .status-uncertain { fill: var(--uncertain); font-weight: 700; }
