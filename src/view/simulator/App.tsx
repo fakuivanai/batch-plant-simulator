@@ -1,6 +1,8 @@
 import { createSignal, For, Match, Show, Switch, type JSX } from 'solid-js';
 import { formatClock } from '../format.ts';
 import { AlarmBanner } from './AlarmBanner.tsx';
+import { BatchPanel } from './BatchPanel.tsx';
+import { BatchRecordPanel } from './BatchRecordPanel.tsx';
 import { Faceplate, type ModuleTag } from './Faceplates.tsx';
 import { IoPanel } from './IoPanel.tsx';
 import { JournalPanel } from './JournalPanel.tsx';
@@ -9,7 +11,7 @@ import { createOperatorSession } from './operator-session.ts';
 import { Overview } from './Overview.tsx';
 import { speeds, type Runtime } from './runtime.ts';
 
-const tabs = ['Faceplate', 'Phases', 'I/O', 'Journal'] as const;
+const tabs = ['Faceplate', 'Phases', 'Batch', 'Batch record', 'I/O', 'Journal'] as const;
 type Tab = (typeof tabs)[number];
 
 export function App(props: { runtime: Runtime }): JSX.Element {
@@ -78,6 +80,12 @@ export function App(props: { runtime: Runtime }): JSX.Element {
             </Match>
             <Match when={tab() === 'Phases'}>
               <PhasesPanel phases={runtime.view.phases} session={session} />
+            </Match>
+            <Match when={tab() === 'Batch'}>
+              <BatchPanel batches={runtime.view.batches} phases={runtime.view.phases} session={session} />
+            </Match>
+            <Match when={tab() === 'Batch record'}>
+              <BatchRecordPanel batches={runtime.view.batches} journal={runtime.view.journal} />
             </Match>
             <Match when={tab() === 'I/O'}>
               <IoPanel view={runtime.view} />

@@ -6,7 +6,7 @@
 // with a reason. That is the edge where outside input enters: the page today,
 // OPC UA clients in the next stage.
 
-import { operator } from './actor.ts';
+import { operator, type Actor } from './actor.ts';
 import type { FieldInputs, FieldOutputs } from './io.ts';
 import type { AnalogInputMode } from './physical-model/control-modules/analog-input.ts';
 import type { DiscreteDeviceMode } from './physical-model/control-modules/discrete-device.ts';
@@ -14,15 +14,17 @@ import type { Mode } from './physical-model/mode.ts';
 import { UnitT200, type DiscreteDeviceTag, type UnitSnapshot } from './physical-model/unit.ts';
 import type { FaultKind } from './process/faults.ts';
 import { Plant, type PlantSnapshot } from './process/plant.ts';
+import { createBatch, type Batch, type BatchCommandRefusal, type BatchSnapshot, type FormulaChangeRefusal } from './procedural-model/batch.ts';
 import { Phase, type EquipmentPhase, type PhaseCommandRefusal, type PhaseName, type PhaseSnapshot } from './procedural-model/phase.ts';
 import { agitate } from './procedural-model/phases/agitate.ts';
 import { chargeWater } from './procedural-model/phases/charge-water.ts';
 import { heat } from './procedural-model/phases/heat.ts';
 import { transfer } from './procedural-model/phases/transfer.ts';
+import { bufferPreparation } from './procedural-model/recipe.ts';
 import type { ProceduralCommand } from './procedural-model/state-machine.ts';
 import { AlarmList, type Alarm } from './record/alarms.ts';
 import { Journal, type JournalEntry } from './record/journal.ts';
-import { refused, type Result } from './result.ts';
+import { accepted, refused, type Result } from './result.ts';
 import { stepMilliseconds } from './time.ts';
 
 export type OperatorCommand =
@@ -41,7 +43,10 @@ export type OperatorCommand =
       readonly command: ProceduralCommand;
       /** START's parameters, by name. */
       readonly parameters?: Readonly<Record<string, number>>;
-    };
+    }
+  | { readonly kind: 'create-batch'; readonly formula: Readonly<Record<string, number>> }
+  | { readonly kind: 'batch-command'; readonly command: ProceduralCommand }
+  | { readonly kind: 'change-formula-value'; readonly parameter: string; readonly value: number };
 
 export type OperatorRefusal =
   | 'NO_OPERATOR_NAME'
@@ -52,7 +57,11 @@ export type OperatorRefusal =
   | 'OUT_OF_RANGE'
   | 'NO_SUCH_ALARM'
   | 'ALREADY_ACKNOWLEDGED'
-  | PhaseCommandRefusal;
+  | PhaseCommandRefusal
+  | BatchCommandRefusal
+  | FormulaChangeRefusal
+  | 'BATCH_ALREADY_ACTIVE'
+  | 'NO_ACTIVE_BATCH';
 
 export const refusalMessages: Record<OperatorRefusal, string> = {
   NO_OPERATOR_NAME: 'Enter your name first: every change is recorded with who made it.',
@@ -67,6 +76,14 @@ export const refusalMessages: Record<OperatorRefusal, string> = {
   OWNED_BY_BATCH: 'A batch owns the phase. Command the batch instead.',
   NOT_OWNER: 'Only the owner of the phase can command it.',
   BAD_PARAMETERS: 'Every parameter needs a value within its limits.',
+  BATCH_RUNS_ONCE: 'A batch makes one lot and is never reset. Create a new batch instead.',
+  REASON_REQUIRED: 'This change needs a reason: it is recorded in the batch record.',
+  EQUIPMENT_NOT_AVAILABLE: 'Every phase has to be IDLE and free before a batch can start.',
+  BAD_FORMULA: 'Every formula value needs a number within its limits.',
+  PARAMETER_ALREADY_USED: 'The phase that uses this value has already started.',
+  BATCH_ENDED: 'The batch has ended.',
+  BATCH_ALREADY_ACTIVE: 'A batch is already active on T-200. It has to end before another is created.',
+  NO_ACTIVE_BATCH: 'There is no active batch.',
 };
 
 /** A fault injected or cleared. Kept apart from the journal: the control system can't know about it. */
@@ -85,6 +102,8 @@ export interface SimulatorSnapshot {
   readonly outputs: FieldOutputs;
   readonly unit: UnitSnapshot;
   readonly phases: Readonly<Record<PhaseName, PhaseSnapshot>>;
+  /** Every batch made so far, oldest first. At most the last one is active. */
+  readonly batches: readonly BatchSnapshot[];
   readonly alarms: readonly Alarm[];
   readonly journal: readonly JournalEntry[];
 }
@@ -96,6 +115,7 @@ export class Simulator {
   readonly #unit: UnitT200;
   readonly #phases: Readonly<Record<PhaseName, EquipmentPhase>>;
   readonly #faultLog: FaultLogEntry[] = [];
+  readonly #batches: Batch<string>[] = [];
   #timeMilliseconds = 0;
   #outputs: FieldOutputs;
 
@@ -103,7 +123,7 @@ export class Simulator {
     this.#plant = new Plant(seed);
     this.#journal = new Journal(
       () => this.#timeMilliseconds,
-      () => null,
+      () => this.#activeBatch()?.id ?? null,
     );
     this.#alarms = new AlarmList(this.#journal);
     this.#unit = new UnitT200(this.#journal);
@@ -139,6 +159,7 @@ export class Simulator {
   /** One scan of the control system: read the inputs, run the logic, write the outputs. */
   #scan(): FieldOutputs {
     this.#unit.readInputs(this.#plant.inputs);
+    this.#activeBatch()?.scan();
     for (const phase of Object.values(this.#phases)) phase.scan(this.#unit);
     const outputs = this.#unit.writeOutputs();
     this.#alarms.update(this.#unit.alarmConditions, this.#timeMilliseconds);
@@ -171,7 +192,29 @@ export class Simulator {
         return this.#alarms.acknowledge(command.alarm, by);
       case 'phase-command':
         return this.#phases[command.phase].command(command.command, by, command.parameters);
+      case 'create-batch':
+        return this.#createBatch(command.formula, by, why);
+      case 'batch-command':
+        return this.#activeBatch()?.command(command.command, by, why) ?? refused('NO_ACTIVE_BATCH');
+      case 'change-formula-value':
+        return this.#activeBatch()?.changeFormula(command.parameter, command.value, by, why) ?? refused('NO_ACTIVE_BATCH');
     }
+  }
+
+  /** The batch that has been created and hasn't ended, if any. */
+  #activeBatch(): Batch<string> | null {
+    const last = this.#batches.at(-1);
+    return last === undefined || last.ended ? null : last;
+  }
+
+  #createBatch(formula: Readonly<Record<string, number>>, by: Actor, reason: string | undefined): Result<OperatorRefusal> {
+    if (this.#activeBatch() !== null) return refused('BATCH_ALREADY_ACTIVE');
+    const id = `B-${String(this.#batches.length + 1).padStart(4, '0')}`;
+    const batch = createBatch(id, bufferPreparation, formula, reason, this.#phases, this.#journal, () => this.#timeMilliseconds);
+    if (typeof batch === 'string') return refused(batch);
+    this.#batches.push(batch);
+    batch.recordCreation(by, reason);
+    return accepted;
   }
 
   injectFault(fault: FaultKind): void {
@@ -199,6 +242,7 @@ export class Simulator {
         HEAT: this.#phases.HEAT.snapshot,
         TRANSFER: this.#phases.TRANSFER.snapshot,
       },
+      batches: this.#batches.map((batch) => batch.snapshot),
       alarms: this.#alarms.alarms,
       journal: [...this.#journal.entries],
     };

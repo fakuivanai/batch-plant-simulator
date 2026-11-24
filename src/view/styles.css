@@ -210,3 +210,16 @@ summary { cursor: pointer; font-weight: 600; }
 .state-table { font-size: 0.75rem; margin-top: 0.4rem; display: block; overflow-x: auto; }
 .state-table th, .state-table td { padding: 0.15rem 0.3rem; border: 1px solid color-mix(in srgb, var(--line) 40%, transparent); }
 .state-table tr.current th { background: var(--device-on); color: var(--device-off); }
+
+/* Batch. */
+.batch-header { display: flex; align-items: center; gap: 0.75rem; }
+.batch-header h3 { margin: 0; }
+table.formula input { width: 5.5rem; }
+.procedure { margin-top: 0.75rem; }
+.procedure p { margin: 0.25rem 0; }
+.operations { margin: 0.25rem 0 0; padding-left: 1.4rem; }
+.operations li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.15rem 0; }
+.operations li.active { font-weight: 600; }
+.operations li.done { color: var(--text-muted); }
+.operation { min-width: 8rem; }
+.phase-name { font-family: ui-monospace, monospace; }

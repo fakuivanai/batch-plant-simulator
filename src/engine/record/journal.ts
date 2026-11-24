@@ -5,6 +5,7 @@
 
 import type { Actor } from '../actor.ts';
 import type { Mode } from '../physical-model/mode.ts';
+import type { BatchTransitionCause } from '../procedural-model/batch.ts';
 import type { PhaseName, PhaseTransitionCause } from '../procedural-model/phase.ts';
 import type { ProceduralState } from '../procedural-model/state-machine.ts';
 
@@ -33,7 +34,38 @@ export type JournalEvent =
       readonly to: ProceduralState;
       readonly cause: PhaseTransitionCause;
     }
-  | { readonly kind: 'phase-parameters'; readonly phase: PhaseName; readonly parameters: Readonly<Record<string, number>>; readonly by: Actor };
+  | { readonly kind: 'phase-parameters'; readonly phase: PhaseName; readonly parameters: Readonly<Record<string, number>>; readonly by: Actor }
+  | {
+      readonly kind: 'batch-created';
+      readonly batchId: string;
+      readonly recipe: string;
+      readonly version: number;
+      readonly product: string;
+      readonly by: Actor;
+    }
+  | {
+      readonly kind: 'formula-value-set';
+      readonly batchId: string;
+      readonly parameter: string;
+      readonly from: number;
+      readonly to: number;
+      readonly unit: string;
+      readonly by: Actor;
+    }
+  | {
+      readonly kind: 'batch-state-changed';
+      readonly batchId: string;
+      readonly from: ProceduralState;
+      readonly to: ProceduralState;
+      readonly cause: BatchTransitionCause;
+    }
+  | {
+      readonly kind: 'procedure-step-started';
+      readonly batchId: string;
+      readonly unitProcedure: string;
+      readonly operation: string;
+      readonly phase: PhaseName;
+    };
 
 export interface JournalEntry {
   readonly atMilliseconds: number;

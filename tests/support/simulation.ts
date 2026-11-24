@@ -1,6 +1,7 @@
 // Helpers for driving a whole simulation from a test.
 import assert from 'node:assert/strict';
 import type { PhaseName } from '../../src/engine/procedural-model/phase.ts';
+import { bufferPreparation } from '../../src/engine/procedural-model/recipe.ts';
 import type { ProceduralCommand, ProceduralState } from '../../src/engine/procedural-model/state-machine.ts';
 import { Simulator, type OperatorCommand } from '../../src/engine/simulator.ts';
 import { stepsIn } from '../../src/engine/time.ts';
@@ -48,4 +49,29 @@ export function commandPhase(
 /** Steps until the phase reaches the state. */
 export function runUntilPhase(simulator: Simulator, phase: PhaseName, state: ProceduralState, limitMilliseconds: number): void {
   runUntil(simulator, () => simulator.phase(phase).state === state, limitMilliseconds, `${phase} reaching ${state}`);
+}
+
+/** The master recipe's default formula, with some values changed. */
+export function formula(changes: Readonly<Record<string, number>> = {}): Record<string, number> {
+  return { ...Object.fromEntries(Object.entries(bufferPreparation.formula).map(([name, value]) => [name, value.defaultValue])), ...changes };
+}
+
+/** A shorter formula for tests that only need a batch to run: same steps, quicker times. */
+export const quickFormula = formula({ waterVolume: 300, mixTime: 2, soakTime: 2, temperature: 30 });
+
+export function createAndStartBatch(
+  simulator: Simulator,
+  values: Readonly<Record<string, number>>,
+  reason = 'Shorter batch for a test',
+): string {
+  const result = simulator.operate(operatorName, { kind: 'create-batch', formula: values }, reason);
+  assert.deepEqual(result, { ok: true }, 'create-batch was refused');
+  operate(simulator, { kind: 'batch-command', command: 'START' });
+  const batch = simulator.snapshot().batches.at(-1);
+  assert.ok(batch !== undefined);
+  return batch.id;
+}
+
+export function batchState(simulator: Simulator): ProceduralState | undefined {
+  return simulator.snapshot().batches.at(-1)?.state;
 }

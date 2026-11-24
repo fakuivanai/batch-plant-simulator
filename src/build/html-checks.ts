@@ -11,6 +11,10 @@ function descendants(node: Node): Node[] {
   return [node, ...('childNodes' in node ? node.childNodes.flatMap(descendants) : [])];
 }
 
+function text(node: Node): string {
+  return 'value' in node ? node.value : 'childNodes' in node ? node.childNodes.map(text).join('') : '';
+}
+
 function attribute(element: Element, name: string): string | undefined {
   return element.attrs.find((item) => item.name === name)?.value;
 }
@@ -19,13 +23,15 @@ export function checkPages(pages: ReadonlyMap<string, string>): void {
   for (const [file, html] of pages) {
     const elements = descendants(parse(html)).filter((node): node is Element => 'tagName' in node);
     for (const element of elements) {
+      if (element.tagName === 'style') {
+        assert.doesNotMatch(text(element), /@import\b|url\(\s*['"]?(?!data:|#)/i, `${file}: an external stylesheet resource`);
+      }
       assert.ok(element.tagName !== 'link' && element.tagName !== 'base', `${file}: a separate resource or URL base`);
       for (const name of ['src', 'srcset', 'poster', 'data']) {
         const value = attribute(element, name);
         assert.ok(value === undefined || value.startsWith('data:'), `${file}: an external resource in ${name}`);
       }
     }
-    assert.doesNotMatch(html, /@import\b|url\(\s*['"]?(?!data:|#)/i, `${file}: an external stylesheet resource`);
     assert.doesNotMatch(html, /\/home\/|\/Users\/|[A-Z]:\\Users\\/, `${file}: a machine-specific path`);
   }
 }
