@@ -193,3 +193,20 @@ table.journal td.time { font-variant-numeric: tabular-nums; white-space: nowrap;
 .overview .signal { stroke: var(--line); stroke-width: 1; stroke-dasharray: 4 3; }
 .overview .alarmed .tag, .overview .instrument.alarmed .letters { fill: var(--alarm); }
 .overview .instrument.alarmed circle { stroke: var(--alarm); stroke-width: 2.5; }
+
+/* Phases. */
+.phase { border-top: 1px solid var(--line); padding: 0.6rem 0; }
+.phase header { display: flex; align-items: center; gap: 0.75rem; }
+.phase h3 { margin: 0; }
+.state { padding: 0.05rem 0.5rem; border-radius: 3px; font-size: 0.85rem; font-weight: 700; border: 1px solid var(--line); }
+.state-active { background: var(--device-on); color: var(--device-off); border-color: var(--device-on); }
+.state-attention { background: var(--warning); color: #1a1400; border-color: var(--warning); }
+.state-abnormal { background: var(--alarm); color: var(--alarm-text); border-color: var(--alarm); }
+.state-quiet { background: var(--surface-raised); }
+.parameters { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.4rem 0; }
+.button-row button { font-size: 0.85rem; }
+details { margin-top: 0.75rem; }
+summary { cursor: pointer; font-weight: 600; }
+.state-table { font-size: 0.75rem; margin-top: 0.4rem; display: block; overflow-x: auto; }
+.state-table th, .state-table td { padding: 0.15rem 0.3rem; border: 1px solid color-mix(in srgb, var(--line) 40%, transparent); }
+.state-table tr.current th { background: var(--device-on); color: var(--device-off); }

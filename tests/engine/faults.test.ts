@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Simulator } from '../../src/engine/simulator.ts';
-import { chargeByHand, operate, runFor, runUntil } from '../support/simulation.ts';
+import { chargeByHand, commandPhase, operate, runFor, runUntil, runUntilPhase } from '../support/simulation.ts';
 
 function alarmIds(simulator: Simulator): string[] {
   return simulator.snapshot().alarms.map((alarm) => alarm.id);
@@ -84,4 +84,66 @@ test('TT-201 failed: TIC-201 sheds to manual with TV-201 closed, alarms, and ret
   simulator.clearFault('temperature-transmitter-failed');
   runFor(simulator, 200);
   assert.equal(loop.actualMode, 'AUTOMATIC');
+});
+
+// What the phases do about the same faults: the failure monitor holds the
+// phase, and its holding logic leaves the equipment safe.
+
+test('XV-201 fails to open: CHARGE_WATER holds with the inlet closed, and completes after a repair, a reset and a restart', () => {
+  const simulator = new Simulator(1);
+  simulator.injectFault('inlet-valve-fails-to-open');
+  commandPhase(simulator, 'CHARGE_WATER', 'START', { targetVolumeLiters: 300 });
+  runUntilPhase(simulator, 'CHARGE_WATER', 'HELD', 30_000);
+  assert.equal(simulator.phase('CHARGE_WATER').snapshot.failure, 'XV-201 failed');
+  assert.equal(simulator.unit.inletValve.output, false);
+  simulator.clearFault('inlet-valve-fails-to-open');
+  operate(simulator, { kind: 'reset-device-failure', module: 'XV-201' });
+  commandPhase(simulator, 'CHARGE_WATER', 'RESTART');
+  runUntilPhase(simulator, 'CHARGE_WATER', 'COMPLETE', 10 * 60_000);
+});
+
+test('P-201 fails to start: TRANSFER holds with the pump off and XV-202 closed', () => {
+  const simulator = new Simulator(1);
+  chargeByHand(simulator, 300);
+  simulator.injectFault('pump-fails-to-start');
+  commandPhase(simulator, 'TRANSFER', 'START', {});
+  runUntilPhase(simulator, 'TRANSFER', 'HELD', 60_000);
+  assert.equal(simulator.phase('TRANSFER').snapshot.failure, 'the transfer module failed: P-201 failed');
+  assert.ok(simulator.unit.transferPump.confirmedPassive);
+  assert.ok(simulator.unit.outletValve.confirmedPassive);
+});
+
+test('LT-201 stuck: CHARGE_WATER holds before the tank overflows, with the inlet closed', () => {
+  const simulator = new Simulator(1);
+  commandPhase(simulator, 'CHARGE_WATER', 'START', { targetVolumeLiters: 600 });
+  runUntil(simulator, () => simulator.unit.level.processValue.value >= 300, 10 * 60_000, 'charging to 300 L');
+  simulator.injectFault('level-transmitter-stuck');
+  runUntilPhase(simulator, 'CHARGE_WATER', 'HELD', 15 * 60_000);
+  assert.ok(simulator.unit.inletValve.confirmedPassive);
+  runFor(simulator, 10 * 60_000);
+  assert.equal(simulator.snapshot().plant.spilledLiters, 0);
+});
+
+test('heater overshoot: HEAT holds on the high deviation and hands TIC-201 back with TV-201 closed', () => {
+  const simulator = new Simulator(1);
+  chargeByHand(simulator, 500);
+  simulator.injectFault('heating-medium-overheated');
+  commandPhase(simulator, 'HEAT', 'START', { setpointCelsius: 37, soakMinutes: 10 });
+  runUntilPhase(simulator, 'HEAT', 'HELD', 30 * 60_000);
+  assert.match(simulator.phase('HEAT').snapshot.failure ?? '', /^TIC-201 high deviation/);
+  assert.equal(simulator.unit.temperature.targetMode, 'MANUAL');
+  simulator.step();
+  assert.equal(simulator.snapshot().outputs['TV-201'].milliamps, 4);
+});
+
+test('TT-201 failed: HEAT holds, and restarting while the signal is still BAD holds it again', () => {
+  const simulator = new Simulator(1);
+  chargeByHand(simulator, 500);
+  commandPhase(simulator, 'HEAT', 'START', { setpointCelsius: 37, soakMinutes: 10 });
+  runFor(simulator, 2 * 60_000);
+  simulator.injectFault('temperature-transmitter-failed');
+  runUntilPhase(simulator, 'HEAT', 'HELD', 10_000);
+  assert.equal(simulator.phase('HEAT').snapshot.failure, 'TIC-201 has shed to MANUAL: TT-201 is BAD');
+  commandPhase(simulator, 'HEAT', 'RESTART');
+  runUntilPhase(simulator, 'HEAT', 'HELD', 10_000);
 });

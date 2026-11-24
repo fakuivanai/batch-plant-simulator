@@ -18,7 +18,7 @@ import type { DiscreteDeviceTag, UnitSnapshot } from '../../engine/physical-mode
 import { formatNumber } from '../format.ts';
 import type { OperatorSession } from './operator-session.ts';
 
-export type ModuleTag = keyof UnitSnapshot;
+export type ModuleTag = Exclude<keyof UnitSnapshot, 'transfer'>;
 
 export const moduleTags: readonly ModuleTag[] = ['XV-201', 'XV-202', 'P-201', 'AG-201', 'LT-201', 'LSHH-201', 'TIC-201'];
 

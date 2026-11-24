@@ -1,8 +1,7 @@
 // Unit T-200 in the ISA-88 physical model. A unit is equipment that carries
 // out one or more major processing activities on a batch, here preparing a
-// buffer in one tank. It contains control modules (and, from the next stage,
-// an equipment module), and it is where the interlocks between them are
-// wired.
+// buffer in one tank. It contains control modules, one equipment module (the
+// transfer), and the interlocks between them.
 //
 // Each scan has three parts: the modules read their inputs, the interlocks are
 // evaluated from what was read, then (after the phases have run) the modules
@@ -23,6 +22,7 @@ import { LevelSwitch, type LevelSwitchSnapshot } from './control-modules/level-s
 import { PidLoop, type PidLoopSnapshot } from './control-modules/pid-loop.ts';
 import { VariableSpeedDrive, type VariableSpeedDriveSnapshot } from './control-modules/variable-speed-drive.ts';
 import { highHighTemperatureCelsius, minimumLevelLiters, type InterlockId } from './interlocks.ts';
+import { TransferModule, type TransferModuleSnapshot } from './transfer-module.ts';
 
 /** A valve strokes in 4 s; 10 s allows a slow stroke and still catches a stuck one quickly. */
 const valveFeedbackTimeoutMilliseconds = 10_000;
@@ -37,6 +37,7 @@ export interface UnitSnapshot {
   readonly 'LT-201': AnalogInputSnapshot;
   readonly 'LSHH-201': LevelSwitchSnapshot;
   readonly 'TIC-201': PidLoopSnapshot;
+  readonly transfer: TransferModuleSnapshot;
 }
 
 export type DiscreteDeviceTag = 'XV-201' | 'XV-202' | 'P-201' | 'AG-201';
@@ -50,6 +51,7 @@ export class UnitT200 {
   readonly level: AnalogInput;
   readonly highHighLevel: LevelSwitch;
   readonly temperature: PidLoop;
+  readonly transfer: TransferModule;
 
   constructor(recorder: Recorder) {
     this.inletValve = new DiscreteDevice(
@@ -97,6 +99,7 @@ export class UnitT200 {
       },
       recorder,
     );
+    this.transfer = new TransferModule(this.outletValve, this.transferPump);
   }
 
   /** Every discrete device by its tag, for the operator's commands. */
@@ -144,6 +147,9 @@ export class UnitT200 {
   }
 
   writeOutputs(): FieldOutputs {
+    // Equipment control runs after the phases have given their commands this
+    // scan, and before the control modules turn requests into outputs.
+    this.transfer.scan();
     this.inletValve.writeOutput();
     this.outletValve.writeOutput();
     this.transferPump.writeOutput();
@@ -188,6 +194,7 @@ export class UnitT200 {
       'LT-201': this.level.snapshot,
       'LSHH-201': this.highHighLevel.snapshot,
       'TIC-201': this.temperature.snapshot,
+      transfer: this.transfer.snapshot,
     };
   }
 }

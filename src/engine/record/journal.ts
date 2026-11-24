@@ -5,6 +5,8 @@
 
 import type { Actor } from '../actor.ts';
 import type { Mode } from '../physical-model/mode.ts';
+import type { PhaseName, PhaseTransitionCause } from '../procedural-model/phase.ts';
+import type { ProceduralState } from '../procedural-model/state-machine.ts';
 
 export type AlarmPriority = 'HIGH' | 'MEDIUM' | 'LOW';
 
@@ -23,7 +25,15 @@ export type JournalEvent =
   | { readonly kind: 'failure-reset'; readonly module: string; readonly failure: string; readonly by: Actor }
   | { readonly kind: 'alarm-raised'; readonly alarm: string; readonly priority: AlarmPriority }
   | { readonly kind: 'alarm-cleared'; readonly alarm: string }
-  | { readonly kind: 'alarm-acknowledged'; readonly alarm: string; readonly by: Actor };
+  | { readonly kind: 'alarm-acknowledged'; readonly alarm: string; readonly by: Actor }
+  | {
+      readonly kind: 'phase-state-changed';
+      readonly phase: PhaseName;
+      readonly from: ProceduralState;
+      readonly to: ProceduralState;
+      readonly cause: PhaseTransitionCause;
+    }
+  | { readonly kind: 'phase-parameters'; readonly phase: PhaseName; readonly parameters: Readonly<Record<string, number>>; readonly by: Actor };
 
 export interface JournalEntry {
   readonly atMilliseconds: number;

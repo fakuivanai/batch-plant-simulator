@@ -183,6 +183,22 @@ export class PidLoop {
     return accepted;
   }
 
+  /**
+   * A phase that is done with the loop, or holding, hands it back to the
+   * operator: in manual, at the output the phase leaves it, normally closed.
+   * Only the program driving the loop in cascade can do this.
+   */
+  handBack(outputPercent: number, by: Actor): Result<'MODE_REFUSES_ACTOR'> {
+    if (this.#targetMode !== 'CASCADE' || by.kind !== 'program') return refused('MODE_REFUSES_ACTOR');
+    this.#recorder.record({ kind: 'mode-changed', module: this.configuration.tag, from: 'CASCADE', to: 'MANUAL', by });
+    this.#targetMode = 'MANUAL';
+    if (outputPercent !== this.#outputPercent) {
+      this.#recorder.record({ kind: 'output-changed', module: this.configuration.tag, from: this.#outputPercent, to: outputPercent, by });
+      this.#outputPercent = outputPercent;
+    }
+    return accepted;
+  }
+
   /** Computes this scan's output. */
   writeOutput(): void {
     const mode = this.actualMode;

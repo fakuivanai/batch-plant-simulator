@@ -1,5 +1,7 @@
 // Helpers for driving a whole simulation from a test.
 import assert from 'node:assert/strict';
+import type { PhaseName } from '../../src/engine/procedural-model/phase.ts';
+import type { ProceduralCommand, ProceduralState } from '../../src/engine/procedural-model/state-machine.ts';
 import { Simulator, type OperatorCommand } from '../../src/engine/simulator.ts';
 import { stepsIn } from '../../src/engine/time.ts';
 
@@ -31,4 +33,19 @@ export function chargeByHand(simulator: Simulator, liters: number): void {
   runUntil(simulator, () => simulator.unit.level.processValue.value >= liters, 20 * 60_000, `filling to ${liters} L`);
   operate(simulator, { kind: 'command-device', module: 'XV-201', active: false });
   runUntil(simulator, () => simulator.unit.inletValve.confirmedPassive, 20_000, 'closing XV-201');
+}
+
+/** Sends a phase command as the operator, expecting it to be accepted. */
+export function commandPhase(
+  simulator: Simulator,
+  phase: PhaseName,
+  command: ProceduralCommand,
+  parameters?: Readonly<Record<string, number>>,
+): void {
+  operate(simulator, parameters === undefined ? { kind: 'phase-command', phase, command } : { kind: 'phase-command', phase, command, parameters });
+}
+
+/** Steps until the phase reaches the state. */
+export function runUntilPhase(simulator: Simulator, phase: PhaseName, state: ProceduralState, limitMilliseconds: number): void {
+  runUntil(simulator, () => simulator.phase(phase).state === state, limitMilliseconds, `${phase} reaching ${state}`);
 }

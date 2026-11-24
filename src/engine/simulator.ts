@@ -14,6 +14,12 @@ import type { Mode } from './physical-model/mode.ts';
 import { UnitT200, type DiscreteDeviceTag, type UnitSnapshot } from './physical-model/unit.ts';
 import type { FaultKind } from './process/faults.ts';
 import { Plant, type PlantSnapshot } from './process/plant.ts';
+import { Phase, type EquipmentPhase, type PhaseCommandRefusal, type PhaseName, type PhaseSnapshot } from './procedural-model/phase.ts';
+import { agitate } from './procedural-model/phases/agitate.ts';
+import { chargeWater } from './procedural-model/phases/charge-water.ts';
+import { heat } from './procedural-model/phases/heat.ts';
+import { transfer } from './procedural-model/phases/transfer.ts';
+import type { ProceduralCommand } from './procedural-model/state-machine.ts';
 import { AlarmList, type Alarm } from './record/alarms.ts';
 import { Journal, type JournalEntry } from './record/journal.ts';
 import { refused, type Result } from './result.ts';
@@ -28,7 +34,14 @@ export type OperatorCommand =
   | { readonly kind: 'set-loop-mode'; readonly mode: Mode }
   | { readonly kind: 'set-loop-setpoint'; readonly value: number }
   | { readonly kind: 'set-loop-output'; readonly percent: number }
-  | { readonly kind: 'acknowledge-alarm'; readonly alarm: string };
+  | { readonly kind: 'acknowledge-alarm'; readonly alarm: string }
+  | {
+      readonly kind: 'phase-command';
+      readonly phase: PhaseName;
+      readonly command: ProceduralCommand;
+      /** START's parameters, by name. */
+      readonly parameters?: Readonly<Record<string, number>>;
+    };
 
 export type OperatorRefusal =
   | 'NO_OPERATOR_NAME'
@@ -38,7 +51,8 @@ export type OperatorRefusal =
   | 'NOT_FAILED'
   | 'OUT_OF_RANGE'
   | 'NO_SUCH_ALARM'
-  | 'ALREADY_ACKNOWLEDGED';
+  | 'ALREADY_ACKNOWLEDGED'
+  | PhaseCommandRefusal;
 
 export const refusalMessages: Record<OperatorRefusal, string> = {
   NO_OPERATOR_NAME: 'Enter your name first: every change is recorded with who made it.',
@@ -49,6 +63,10 @@ export const refusalMessages: Record<OperatorRefusal, string> = {
   OUT_OF_RANGE: 'The value is outside the allowed range.',
   NO_SUCH_ALARM: 'That alarm is no longer on the list.',
   ALREADY_ACKNOWLEDGED: 'That alarm is already acknowledged.',
+  NOT_ACCEPTED_IN_STATE: "The phase's state doesn't accept that command.",
+  OWNED_BY_BATCH: 'A batch owns the phase. Command the batch instead.',
+  NOT_OWNER: 'Only the owner of the phase can command it.',
+  BAD_PARAMETERS: 'Every parameter needs a value within its limits.',
 };
 
 /** A fault injected or cleared. Kept apart from the journal: the control system can't know about it. */
@@ -66,6 +84,7 @@ export interface SimulatorSnapshot {
   readonly inputs: FieldInputs;
   readonly outputs: FieldOutputs;
   readonly unit: UnitSnapshot;
+  readonly phases: Readonly<Record<PhaseName, PhaseSnapshot>>;
   readonly alarms: readonly Alarm[];
   readonly journal: readonly JournalEntry[];
 }
@@ -75,6 +94,7 @@ export class Simulator {
   readonly #journal: Journal;
   readonly #alarms: AlarmList;
   readonly #unit: UnitT200;
+  readonly #phases: Readonly<Record<PhaseName, EquipmentPhase>>;
   readonly #faultLog: FaultLogEntry[] = [];
   #timeMilliseconds = 0;
   #outputs: FieldOutputs;
@@ -87,6 +107,12 @@ export class Simulator {
     );
     this.#alarms = new AlarmList(this.#journal);
     this.#unit = new UnitT200(this.#journal);
+    this.#phases = {
+      CHARGE_WATER: new Phase(chargeWater, this.#journal),
+      AGITATE: new Phase(agitate, this.#journal),
+      HEAT: new Phase(heat, this.#journal),
+      TRANSFER: new Phase(transfer, this.#journal),
+    };
     this.#outputs = this.#scan();
   }
 
@@ -99,6 +125,11 @@ export class Simulator {
     return this.#unit;
   }
 
+  /** A phase, for tests. Operators go through `operate`. */
+  phase(name: PhaseName): EquipmentPhase {
+    return this.#phases[name];
+  }
+
   step(): void {
     this.#plant.step(this.#outputs);
     this.#timeMilliseconds += stepMilliseconds;
@@ -108,6 +139,7 @@ export class Simulator {
   /** One scan of the control system: read the inputs, run the logic, write the outputs. */
   #scan(): FieldOutputs {
     this.#unit.readInputs(this.#plant.inputs);
+    for (const phase of Object.values(this.#phases)) phase.scan(this.#unit);
     const outputs = this.#unit.writeOutputs();
     this.#alarms.update(this.#unit.alarmConditions, this.#timeMilliseconds);
     return outputs;
@@ -137,6 +169,8 @@ export class Simulator {
         return this.#unit.temperature.setOutput(command.percent, by, why);
       case 'acknowledge-alarm':
         return this.#alarms.acknowledge(command.alarm, by);
+      case 'phase-command':
+        return this.#phases[command.phase].command(command.command, by, command.parameters);
     }
   }
 
@@ -159,6 +193,12 @@ export class Simulator {
       inputs: this.#plant.inputs,
       outputs: this.#outputs,
       unit: this.#unit.snapshot,
+      phases: {
+        CHARGE_WATER: this.#phases.CHARGE_WATER.snapshot,
+        AGITATE: this.#phases.AGITATE.snapshot,
+        HEAT: this.#phases.HEAT.snapshot,
+        TRANSFER: this.#phases.TRANSFER.snapshot,
+      },
       alarms: this.#alarms.alarms,
       journal: [...this.#journal.entries],
     };

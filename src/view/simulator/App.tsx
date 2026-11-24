@@ -4,11 +4,12 @@ import { AlarmBanner } from './AlarmBanner.tsx';
 import { Faceplate, type ModuleTag } from './Faceplates.tsx';
 import { IoPanel } from './IoPanel.tsx';
 import { JournalPanel } from './JournalPanel.tsx';
+import { PhasesPanel } from './PhasesPanel.tsx';
 import { createOperatorSession } from './operator-session.ts';
 import { Overview } from './Overview.tsx';
 import { speeds, type Runtime } from './runtime.ts';
 
-const tabs = ['Faceplate', 'I/O', 'Journal'] as const;
+const tabs = ['Faceplate', 'Phases', 'I/O', 'Journal'] as const;
 type Tab = (typeof tabs)[number];
 
 export function App(props: { runtime: Runtime }): JSX.Element {
@@ -74,6 +75,9 @@ export function App(props: { runtime: Runtime }): JSX.Element {
               >
                 {(tag) => <Faceplate tag={tag()} unit={runtime.view.unit} session={session} />}
               </Show>
+            </Match>
+            <Match when={tab() === 'Phases'}>
+              <PhasesPanel phases={runtime.view.phases} session={session} />
             </Match>
             <Match when={tab() === 'I/O'}>
               <IoPanel view={runtime.view} />
