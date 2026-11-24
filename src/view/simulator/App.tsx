@@ -1,11 +1,25 @@
-import type { JSX } from 'solid-js';
+import { createSignal, For, Match, Show, Switch, type JSX } from 'solid-js';
 import { formatClock } from '../format.ts';
+import { AlarmBanner } from './AlarmBanner.tsx';
+import { Faceplate, type ModuleTag } from './Faceplates.tsx';
 import { IoPanel } from './IoPanel.tsx';
+import { JournalPanel } from './JournalPanel.tsx';
+import { createOperatorSession } from './operator-session.ts';
 import { Overview } from './Overview.tsx';
 import { speeds, type Runtime } from './runtime.ts';
 
+const tabs = ['Faceplate', 'I/O', 'Journal'] as const;
+type Tab = (typeof tabs)[number];
+
 export function App(props: { runtime: Runtime }): JSX.Element {
   const runtime = props.runtime;
+  const session = createOperatorSession(runtime);
+  const [selected, setSelected] = createSignal<ModuleTag | null>(null);
+  const [tab, setTab] = createSignal<Tab>('Faceplate');
+  const select = (tag: ModuleTag) => {
+    setSelected(tag);
+    setTab('Faceplate');
+  };
   return (
     <div class="layout">
       <header class="bar">
@@ -25,21 +39,50 @@ export function App(props: { runtime: Runtime }): JSX.Element {
               if (chosen !== undefined) runtime.setSpeed(chosen);
             }}
           >
-            {speeds.map((speed) => (
-              <option value={speed}>{speed}×</option>
-            ))}
+            <For each={speeds}>{(speed) => <option value={speed}>{speed}×</option>}</For>
           </select>
         </label>
+        <span class="spacer" />
+        <label>
+          Operator{' '}
+          <input type="text" value={session.name()} onInput={(event) => session.setName(event.currentTarget.value)} />
+        </label>
       </header>
+      <AlarmBanner alarms={runtime.view.alarms} session={session} />
+      <Show when={session.refusal()}>{(message) => <p class="refusal">{message()}</p>}</Show>
       <main class="workspace">
-        <Overview view={runtime.view} />
-        <IoPanel
-          view={runtime.view}
-          force={(changes) => {
-            runtime.simulator.forceOutputs(changes);
-            runtime.refresh();
-          }}
-        />
+        <Overview view={runtime.view} selected={selected()} select={select} />
+        <div class="side">
+          <nav class="tabs" aria-label="Panels">
+            <For each={tabs}>
+              {(name) => (
+                <button type="button" classList={{ active: tab() === name }} onClick={() => setTab(name)}>
+                  {name}
+                </button>
+              )}
+            </For>
+          </nav>
+          <Switch>
+            <Match when={tab() === 'Faceplate'}>
+              <Show
+                when={selected()}
+                fallback={
+                  <section class="panel">
+                    <p class="hint">Click a valve, the pump, the agitator or an instrument on the diagram to open its faceplate.</p>
+                  </section>
+                }
+              >
+                {(tag) => <Faceplate tag={tag()} unit={runtime.view.unit} session={session} />}
+              </Show>
+            </Match>
+            <Match when={tab() === 'I/O'}>
+              <IoPanel view={runtime.view} />
+            </Match>
+            <Match when={tab() === 'Journal'}>
+              <JournalPanel entries={runtime.view.journal} />
+            </Match>
+          </Switch>
+        </div>
       </main>
     </div>
   );

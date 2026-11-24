@@ -11,6 +11,7 @@
 import type { FieldInputs, FieldOutputs, SignalRange } from '../io.ts';
 import { fromMilliamps, namurNe43, signalRanges, toMilliamps } from '../io.ts';
 import { NoiseSource } from '../noise.ts';
+import { faultKinds, type FaultKind } from './faults.ts';
 import { stepMilliseconds, stepSeconds } from '../time.ts';
 
 /** Water near room temperature. */
@@ -37,8 +38,11 @@ export const plantParameters = {
   motorFeedbackDelayMilliseconds: 500,
   ambientCelsius: 20,
   heatingMediumSupplyCelsius: 90,
+  /** The supply temperature while the heater overshoot fault is active. */
+  overheatedHeatingMediumSupplyCelsius: 200,
   heatingMediumMaximumFlowLitersPerMinute: 60,
-  jacketVolumeLiters: 50,
+  /** A half-pipe coil jacket holds little water, so little heat is left in it once TV-201 closes. */
+  jacketVolumeLiters: 10,
   jacketToContentsWattsPerKelvin: 1500,
   contentsToAmbientWattsPerKelvin: 20,
   /** About 300 kg of stainless steel at 500 J/(kg K). It keeps an empty tank's temperature finite. */
@@ -47,6 +51,8 @@ export const plantParameters = {
   temperatureSensorLagSeconds: 10,
   levelNoiseLiters: 0.5,
   temperatureNoiseCelsius: 0.05,
+  /** A failed transmitter drives its output to the NE 43 failure level, 3.6 mA or below. */
+  failedTransmitterMilliamps: 3.5,
 } as const;
 
 /** What is really in and around the tank, as opposed to what the instruments report. */
@@ -87,10 +93,11 @@ class MotorStarter {
   }
 }
 
-/** An on/off valve's position moves toward its command at the stroke rate. */
-function strokeValve(position: number, energized: boolean): number {
+/** An on/off valve moves toward its command at the stroke rate; `opens` is false when its actuator can no longer open it. */
+function strokeValve(position: number, energized: boolean, opens: boolean): number {
   const travel = stepSeconds / plantParameters.valveStrokeSeconds;
-  return energized ? Math.min(1, position + travel) : Math.max(0, position - travel);
+  if (!energized) return Math.max(0, position - travel);
+  return opens ? Math.min(1, position + travel) : position;
 }
 
 function clamp(value: number, lower: number, upper: number): number {
@@ -120,6 +127,14 @@ export class Plant {
   #agitatorSpeedRpm = 0;
   #inputs: FieldInputs;
 
+  // The injected faults. The stuck level transmitter holds the signal it had
+  // when it stuck, so its fault is that value, or null when it works.
+  #inletValveFailsToOpen = false;
+  #pumpFailsToStart = false;
+  #levelStuckAtMilliamps: number | null = null;
+  #heatingMediumOverheated = false;
+  #temperatureTransmitterFailed = false;
+
   constructor(seed: number) {
     this.#noise = new NoiseSource(seed);
     this.#inputs = this.#measure();
@@ -146,6 +161,54 @@ export class Plant {
     };
   }
 
+  get activeFaults(): readonly FaultKind[] {
+    return faultKinds.filter((kind) => this.#faultActive(kind));
+  }
+
+  #faultActive(kind: FaultKind): boolean {
+    switch (kind) {
+      case 'inlet-valve-fails-to-open':
+        return this.#inletValveFailsToOpen;
+      case 'pump-fails-to-start':
+        return this.#pumpFailsToStart;
+      case 'level-transmitter-stuck':
+        return this.#levelStuckAtMilliamps !== null;
+      case 'heating-medium-overheated':
+        return this.#heatingMediumOverheated;
+      case 'temperature-transmitter-failed':
+        return this.#temperatureTransmitterFailed;
+    }
+  }
+
+  inject(kind: FaultKind): void {
+    this.#setFault(kind, true);
+  }
+
+  clear(kind: FaultKind): void {
+    this.#setFault(kind, false);
+  }
+
+  #setFault(kind: FaultKind, active: boolean): void {
+    switch (kind) {
+      case 'inlet-valve-fails-to-open':
+        this.#inletValveFailsToOpen = active;
+        break;
+      case 'pump-fails-to-start':
+        this.#pumpFailsToStart = active;
+        break;
+      case 'level-transmitter-stuck':
+        if (!active) this.#levelStuckAtMilliamps = null;
+        else if (this.#levelStuckAtMilliamps === null) this.#levelStuckAtMilliamps = this.#inputs['LT-201'].milliamps;
+        break;
+      case 'heating-medium-overheated':
+        this.#heatingMediumOverheated = active;
+        break;
+      case 'temperature-transmitter-failed':
+        this.#temperatureTransmitterFailed = active;
+        break;
+    }
+  }
+
   step(outputs: FieldOutputs): void {
     this.#moveDevices(outputs);
     this.#integrate();
@@ -153,12 +216,12 @@ export class Plant {
   }
 
   #moveDevices(outputs: FieldOutputs): void {
-    this.#inletValvePosition = strokeValve(this.#inletValvePosition, outputs['XV-201'].energized);
-    this.#outletValvePosition = strokeValve(this.#outletValvePosition, outputs['XV-202'].energized);
+    this.#inletValvePosition = strokeValve(this.#inletValvePosition, outputs['XV-201'].energized, !this.#inletValveFailsToOpen);
+    this.#outletValvePosition = strokeValve(this.#outletValvePosition, outputs['XV-202'].energized, true);
     // TV-201 is a control valve with a positioner; its stroke is fast next to
     // the jacket's response, so the model takes its position as immediate.
     this.#heatingValvePosition = clamp((outputs['TV-201'].milliamps - 4) / 16, 0, 1);
-    this.#pump.step(outputs['P-201'].energized);
+    this.#pump.step(outputs['P-201'].energized && !this.#pumpFailsToStart);
     this.#agitator.step(outputs['AG-201'].energized);
     const speedReference = fromMilliamps(outputs['AG-201'].speedReferenceMilliamps, signalRanges['AG-201']);
     this.#agitatorSpeedRpm = this.#agitator.running
@@ -185,7 +248,9 @@ export class Plant {
     const contentsCelsiusPerSecond = (jacketToContentsWatts - lossWatts + inflowWatts) / contentsHeatCapacity;
 
     // Energy balance of the jacket: heating medium flowing through, heat into the contents.
-    const supplyCelsius = p.heatingMediumSupplyCelsius;
+    const supplyCelsius = this.#heatingMediumOverheated
+      ? p.overheatedHeatingMediumSupplyCelsius
+      : p.heatingMediumSupplyCelsius;
     const mediumLitersPerSecond = (p.heatingMediumMaximumFlowLitersPerMinute / 60) * this.#heatingValvePosition;
     const mediumWatts = mediumLitersPerSecond * joulesPerLiterKelvin * (supplyCelsius - this.#jacketCelsius);
     const jacketCelsiusPerSecond = (mediumWatts - jacketToContentsWatts) / (p.jacketVolumeLiters * joulesPerLiterKelvin);
@@ -216,8 +281,14 @@ export class Plant {
       },
       'P-201': { running: this.#pump.running },
       'AG-201': { running: this.#agitator.running },
-      'LT-201': { milliamps: transmit(this.#volumeLiters + levelNoise, signalRanges['LT-201']) },
-      'TT-201': { milliamps: transmit(this.#sensorCelsius + temperatureNoise, signalRanges['TT-201']) },
+      'LT-201': {
+        milliamps: this.#levelStuckAtMilliamps ?? transmit(this.#volumeLiters + levelNoise, signalRanges['LT-201']),
+      },
+      'TT-201': {
+        milliamps: this.#temperatureTransmitterFailed
+          ? p.failedTransmitterMilliamps
+          : transmit(this.#sensorCelsius + temperatureNoise, signalRanges['TT-201']),
+      },
       'LSHH-201': { contactClosed: this.#volumeLiters < p.highHighSwitchLiters },
     };
   }
