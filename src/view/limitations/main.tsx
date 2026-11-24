@@ -63,6 +63,27 @@ function Limitations(): JSX.Element {
         <li>Discrete devices don't detect a change nobody commanded until it outlasts their feedback timeout.</li>
       </ul>
 
+      <h2>Connecting over OPC UA</h2>
+      <ul>
+        <li>
+          The server has no security: no encryption, no sign-in, every client may write. It listens only on this machine
+          unless told otherwise, and it shouldn't be opened to a network.
+        </li>
+        <li>
+          Outside software drives the phases, not the devices. A role where it drives the raw I/O and brings its own control
+          logic, as a control system does with a process simulator, isn't offered.
+        </li>
+        <li>
+          The address space has values only: no OPC UA methods, no alarms and conditions, no history. Commands from any
+          client are journaled as one "OPC UA client", not by user.
+        </li>
+        <li>
+          The watchdog counts simulated time. At speeds other than real time, an engine writing once a second looks too slow,
+          and its phases hold.
+        </li>
+        <li>A reset takes a phase straight back to IDLE, so it never reports a resetting state.</li>
+      </ul>
+
       <h2>The batch side</h2>
       <ul>
         <li>

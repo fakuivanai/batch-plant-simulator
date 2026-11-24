@@ -261,3 +261,5 @@ table.formula input { width: 5.5rem; }
 .bar a { font-size: 0.9rem; }
 .server-clock { font-size: 0.9rem; color: var(--text-muted); }
 .server-clock.lost { color: var(--alarm); font-weight: 600; }
+.number-tables { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+.document code { font-size: 0.9em; background: var(--surface); padding: 0 0.2rem; border-radius: 3px; }

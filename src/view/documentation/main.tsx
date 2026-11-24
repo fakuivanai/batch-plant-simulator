@@ -15,6 +15,7 @@ import { transfer } from '../../engine/procedural-model/phases/transfer.ts';
 import { bufferPreparation } from '../../engine/procedural-model/recipe.ts';
 import { logicStates } from '../../engine/procedural-model/state-machine.ts';
 import { stepMilliseconds } from '../../engine/time.ts';
+import { commandNumbers, stateNumbers } from '../../server/phase-interface.ts';
 import { pageFile } from '../pages.ts';
 import { StateDiagram } from '../StateDiagram.tsx';
 import { StateTable } from '../simulator/PhasesPanel.tsx';
@@ -300,6 +301,96 @@ function Documentation(): JSX.Element {
       <p class="try">
         <strong>Try it.</strong> After a batch, open the Batch record tab. Every phase state change is there with its cause,
         and every formula value with its old and new value. Download it as JSON.
+      </p>
+
+
+      <h2 id="opc-ua">Connecting other software over OPC UA</h2>
+      <p>
+        OPC UA is the common language control systems, batch systems and HMIs use to read and write each other's values. A
+        server publishes a tree of named values, the <em>address space</em>; a client browses the tree, reads values,
+        subscribes to changes and writes where it is allowed. Every value comes with a status code and a timestamp.
+      </p>
+      <p>
+        <code>pnpm serve</code> runs the simulation on your machine, in real time, and publishes unit T-200 as an OPC UA server
+        at <code>opc.tcp://localhost:4840</code>. It also serves these pages at <code>http://localhost:8080/</code>, where the
+        simulator page shows the server's simulation, so you can watch and operate the plant while other software drives it.
+        The server listens only on this machine, with no encryption and no sign-in.
+      </p>
+      <h3>The address space</h3>
+      <p>
+        The tree follows the ISA-88 physical model: <code>T-200</code>, then <code>IO</code> (the raw signals),{' '}
+        <code>ControlModules</code>, <code>EquipmentModules</code>, <code>Phases</code> and <code>Batch</code>. Node ids are
+        the path, for example <code>ns=1;s=T-200.ControlModules.LT-201.PV</code>. A measured value carries its status as its
+        OPC UA status code: GOOD is <code>Good</code>, UNCERTAIN is <code>Uncertain</code>, and BAD is{' '}
+        <code>BadSensorFailure</code> for a failed instrument or <code>BadOutOfService</code> for a module out of service.
+      </p>
+      <h3>A batch engine driving the phases</h3>
+      <p>
+        A batch engine in other software can run its own recipes on this plant's phases, the way a batch system drives phase
+        logic in a controller. First the operator hands each phase to it, with the button on the Phases tab; until then the
+        phase refuses its commands. Then, for each phase, the engine:
+      </p>
+      <ol>
+        <li>
+          writes the parameters under <code>Parameters</code>;
+        </li>
+        <li>
+          writes a command number to <code>Command</code>, and reads the state from <code>State</code> and{' '}
+          <code>StateNumber</code>;
+        </li>
+        <li>
+          writes a new value to <code>Watchdog</code> about once a second, which the phase echoes on <code>WatchdogEcho</code>.
+        </li>
+      </ol>
+      <p>
+        A refused command comes back as a Bad status code on the write, with the reason in <code>CommandResult</code>. If the
+        watchdog stops changing for 10 s while the phase works, the phase holds: the engine has lost contact, and nobody would
+        be in charge. The numbers are the ones batch engines commonly use for this kind of interface; ISA-88 names the
+        commands and states but doesn't number them.
+      </p>
+      <div class="number-tables">
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Number</th>
+            </tr>
+          </thead>
+          <tbody>
+            <For each={Object.entries(commandNumbers)}>
+              {([command, number]) => (
+                <tr>
+                  <td>{command}</td>
+                  <td>{number}</td>
+                </tr>
+              )}
+            </For>
+          </tbody>
+        </table>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>State</th>
+              <th>Number</th>
+            </tr>
+          </thead>
+          <tbody>
+            <For each={Object.entries(stateNumbers)}>
+              {([state, number]) => (
+                <tr>
+                  <td>{state}</td>
+                  <td>{number}</td>
+                </tr>
+              )}
+            </For>
+          </tbody>
+        </table>
+      </div>
+      <p class="try">
+        <strong>Try it.</strong> Run <code>pnpm serve</code>, open <code>http://localhost:8080/</code> and hand CHARGE_WATER to
+        the batch engine. With any OPC UA client, write 300 to <code>Parameters.targetVolumeLiters</code> and 1 (START) to{' '}
+        <code>Command</code>. The page shows the phase running and the journal shows who started it. Stop writing the watchdog
+        and watch the phase hold 10 s later.
       </p>
 
       <h2 id="faults">Faults</h2>
