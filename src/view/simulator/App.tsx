@@ -1,5 +1,6 @@
 import { createSignal, For, Match, Show, Switch, type JSX } from 'solid-js';
 import { formatClock } from '../format.ts';
+import { pageFile } from '../pages.ts';
 import { AlarmBanner } from './AlarmBanner.tsx';
 import { BatchPanel } from './BatchPanel.tsx';
 import { BatchRecordPanel } from './BatchRecordPanel.tsx';
@@ -46,6 +47,8 @@ export function App(props: { runtime: Runtime }): JSX.Element {
             <For each={speeds}>{(speed) => <option value={speed}>{speed}×</option>}</For>
           </select>
         </label>
+        <a href={pageFile('documentation')}>How it works</a>
+        <a href={pageFile('limitations')}>Limitations</a>
         <span class="spacer" />
         <label>
           Operator{' '}

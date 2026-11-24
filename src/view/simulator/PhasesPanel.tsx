@@ -13,6 +13,7 @@ import {
   type ProceduralState,
 } from '../../engine/procedural-model/state-machine.ts';
 import { formatNumber } from '../format.ts';
+import { StateDiagram } from '../StateDiagram.tsx';
 import type { OperatorSession } from './operator-session.ts';
 
 /** States that need the operator's attention get colour; the rest stay grey. */
@@ -171,8 +172,9 @@ export function PhasesPanel(props: { phases: Readonly<Record<PhaseName, PhaseSna
       </p>
       <For each={phases()}>{(phase) => <PhaseCard phase={phase} session={props.session} />}</For>
       <details>
-        <summary>The state table</summary>
-        <p class="hint">Which state each command leads to. Highlighted rows are states a phase is in now.</p>
+        <summary>The state machine</summary>
+        <p class="hint">Highlighted: the states the phases are in now.</p>
+        <StateDiagram current={phases().map((phase) => phase.state)} />
         <StateTable current={phases().map((phase) => phase.state)} />
       </details>
     </section>

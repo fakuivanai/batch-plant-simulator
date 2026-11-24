@@ -233,3 +233,29 @@ table.formula input { width: 5.5rem; }
 .fault.active strong { color: var(--simulator); }
 .fault.active strong::after { content: ' (active)'; }
 .fault-log { margin: 0; padding-left: 1.2rem; font-size: 0.9rem; }
+
+/* The state diagram. */
+.state-diagram { width: 100%; max-width: 40rem; height: auto; }
+.state-diagram text { font-size: 11px; fill: var(--text); text-anchor: middle; }
+.state-diagram .state-node rect { fill: var(--surface-raised); stroke: var(--line-strong); stroke-width: 1.2; }
+.state-diagram .state-node.acting rect { fill: color-mix(in srgb, var(--accent) 18%, var(--surface-raised)); }
+.state-diagram .state-node.current rect { fill: var(--device-on); }
+.state-diagram .state-node.current text { fill: var(--device-off); font-weight: 700; }
+.state-diagram .arrow { fill: none; stroke: var(--line-strong); stroke-width: 1.2; }
+.state-diagram .arrowhead { fill: var(--line-strong); }
+.state-diagram .arrow-label { font-size: 10px; fill: var(--text-muted); text-anchor: start; }
+.state-diagram .frame { fill: none; stroke: var(--line); stroke-dasharray: 6 4; }
+.state-diagram .frame-label { font-size: 10px; fill: var(--text-muted); text-anchor: end; }
+
+/* Documentation pages. */
+.document { max-width: 52rem; margin: 0 auto; padding: 1rem 16px 3rem; line-height: 1.55; }
+.document h1 { font-size: 1.6rem; margin: 1rem 0; }
+.document h2 { font-size: 1.25rem; margin: 2rem 0 0.5rem; }
+.document h3 { font-size: 1.05rem; margin: 1.25rem 0 0.25rem; }
+.document h4 { font-size: 0.95rem; margin: 1rem 0 0.25rem; font-family: ui-monospace, monospace; }
+.document .try { padding: 0.5rem 0.75rem; border-left: 4px solid var(--accent); background: var(--surface); }
+.document .state-table { font-size: 0.8rem; }
+.doc-table { margin: 0.5rem 0; font-size: 0.9rem; }
+.doc-table th, .doc-table td { border: 1px solid color-mix(in srgb, var(--line) 40%, transparent); padding: 0.25rem 0.5rem; vertical-align: top; }
+.doc-table th { white-space: nowrap; }
+.bar a { font-size: 0.9rem; }
