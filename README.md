@@ -17,11 +17,13 @@ browser, with no server or network. `index.html` is the simulator;
 
 ## Cloning
 
-The guidelines for coding agents come in as a submodule:
-
 ```sh
-git clone --recurse-submodules <URL>
+git clone https://github.com/fakuivanai/batch-plant-simulator.git
 ```
+
+`external/clankerlib` is a submodule holding the guidelines that
+`AGENTS.md` gives coding agents. It isn't published, so it stays empty in a
+clone. Nothing builds, tests or runs from it.
 
 ## Development
 
