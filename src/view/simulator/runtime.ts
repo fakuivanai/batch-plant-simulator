@@ -3,16 +3,13 @@
 
 import { createStore, reconcile } from 'solid-js/store';
 import { Simulator, type SimulatorSnapshot } from '../../engine/simulator.ts';
-import { stepMilliseconds } from '../../engine/time.ts';
+import { Pacer } from '../../engine/pacing.ts';
 
 /** How many simulated seconds pass per wall-clock second. */
 export const speeds = [1, 10, 60, 300] as const;
 export type Speed = (typeof speeds)[number];
 
-/**
- * A frame never runs more steps than this, so a slow machine or a tab that
- * comes back from the background falls behind instead of freezing.
- */
+/** At most this many steps per frame: 200 s of simulated time, enough for 300× at 60 frames per second. */
 const maximumStepsPerFrame = 2000;
 
 export interface Runtime {
@@ -30,16 +27,14 @@ export function startRuntime(seed: number): Runtime {
   const [view, setView] = createStore<SimulatorSnapshot>(simulator.snapshot());
   const [controls, setControls] = createStore<{ running: boolean; speed: Speed }>({ running: true, speed: 10 });
   let previousFrame: number | null = null;
-  let owedMilliseconds = 0;
+  const pacer = new Pacer(maximumStepsPerFrame);
 
   const refresh = () => setView(reconcile(simulator.snapshot()));
 
   const frame = (now: number) => {
     if (controls.running && previousFrame !== null) {
-      owedMilliseconds += (now - previousFrame) * controls.speed;
-      const steps = Math.min(Math.floor(owedMilliseconds / stepMilliseconds), maximumStepsPerFrame);
+      const steps = pacer.steps(now - previousFrame, controls.speed);
       for (let step = 0; step < steps; step++) simulator.step();
-      owedMilliseconds = steps === maximumStepsPerFrame ? 0 : owedMilliseconds - steps * stepMilliseconds;
       if (steps > 0) refresh();
     }
     previousFrame = now;
